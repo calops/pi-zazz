@@ -106,7 +106,9 @@ export class GridComponent extends CustomEditor {
 	}
 
 	override handleInput(data: string): void {
-		// Always forward to CustomEditor for text editing + app keybindings
+		// Forward input to the editor widget first, then fallback to CustomEditor
+		const editorWidget = this.widgets.get("main:editor");
+		if (editorWidget?.handleInput?.(data)) return;
 		super.handleInput(data);
 	}
 
@@ -115,16 +117,6 @@ export class GridComponent extends CustomEditor {
 		this.config = config;
 		this.widgets.clear();
 		this.invalidate();
-	}
-
-	/**
-	 * Render the built-in editor content (CustomEditor's own text buffer)
-	 * sliced to the given width and height. Used for editor-type cells.
-	 */
-	private renderEditorCell(width: number, height: number): string[] {
-		const editorLines = super.render(width);
-		// Keep at most 'height' lines, but always show at least the first line (with cursor)
-		return editorLines.slice(0, Math.max(1, height));
 	}
 
 	private getWidget(
@@ -142,13 +134,6 @@ export class GridComponent extends CustomEditor {
 			if (!colConfig)
 				throw new Error(`Column ${colId} not found in row ${rowId}`);
 
-			// Editor columns use the built-in CustomEditor rendering, not a widget
-			if (colConfig.widget.type === "editor") {
-				widget = this.createEditorWidget();
-				this.widgets.set(key, widget);
-				return widget;
-			}
-
 			const cellInfo: GridCellInfo = {
 				row: this.config.rows.findIndex((r) => r.id === rowId),
 				col: colIndex,
@@ -161,21 +146,6 @@ export class GridComponent extends CustomEditor {
 			this.widgets.set(key, widget);
 		}
 		return widget;
-	}
-
-	/** Creates a pass-through widget that renders CustomEditor's own text buffer */
-	private createEditorWidget(): WidgetInstance {
-		const self = this;
-		return {
-			render(w: number, h: number): string[] {
-				return self.renderEditorCell(w, h);
-			},
-			handleInput(_data: string): boolean {
-				// Input is handled by GridComponent.handleInput → super.handleInput
-				return false;
-			},
-			invalidate(): void {},
-		};
 	}
 
 	private clampLine(line: string, width: number): string {

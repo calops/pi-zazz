@@ -5,6 +5,7 @@ import type { GridConfig } from "./grid/types.ts";
 
 // Side-effect imports: register built-in widgets
 import "./widgets/editor-widget.ts";
+import "./widgets/custom-editor-widget.ts";
 import "./widgets/status-bar-widget.ts";
 import "./widgets/lens-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
@@ -65,6 +66,7 @@ export default function (pi: ExtensionAPI) {
 			tui: ctx.ui as never,
 			theme: ctx.ui.theme as { fg: (c: string, t: string) => string },
 			keybindings: undefined as unknown,
+			completionEngine: undefined as CompletionEngine | undefined,
 		};
 
 		completionEngine = new CompletionEngine((component, opts) => {
@@ -75,6 +77,7 @@ export default function (pi: ExtensionAPI) {
 			).custom(component, opts);
 			return { close: () => handle.close?.() };
 		});
+		deps.completionEngine = completionEngine;
 
 		// Replace editor — construct GridComponent inside the factory so it receives
 		// the real keybindings from pi (required by CustomEditor.handleInput).

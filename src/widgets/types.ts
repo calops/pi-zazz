@@ -1,16 +1,16 @@
 import type { GridCellInfo } from "../grid/types.ts";
+import type { CompletionEngine } from "../completion/completion-engine.ts";
 
 /** Dependencies injected into every widget factory */
 export interface WidgetDeps {
-	pi: unknown; // ExtensionAPI — typed as unknown to avoid import cycle, cast at usage sites
-	/** TUI instance (for requestRender, screen dimensions) */
+	pi: unknown;
 	tui: { termWidth?: number; termHeight?: number; requestRender?: () => void };
-	/** Theme foreground color helper */
 	theme: {
 		fg: (color: string, text: string) => string;
 	};
-	/** Keybinding manager for shortcut detection */
 	keybindings: unknown;
+	/** Completion engine, injected by the grid component after creation */
+	completionEngine?: CompletionEngine;
 }
 
 /** Interface every widget must implement */
