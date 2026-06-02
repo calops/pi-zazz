@@ -1,7 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { ICONS } from "../icons.ts";
 
-/** A rendered pill */
 export interface Pill {
   text: string;
   width: number;
@@ -29,7 +28,7 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 
 /**
  * Pack pills horizontally into available width.
- * Shrinks from the middle (inner pills removed first, keeping outer ones).
+ * Overflow removes pills from the middle inward.
  */
 export function packPills(
   leftPills: readonly Pill[],
@@ -59,10 +58,12 @@ export function packPills(
   const leftStr = left.map((p) => p.text).join(separator.char);
   const rightStr = right.map((p) => p.text).join(separator.char);
 
-  const leftWidth = left.reduce((s, p) => s + p.width, 0) +
-    Math.max(0, (left.length - 1)) * separator.width;
-  const rightWidth = right.reduce((s, p) => s + p.width, 0) +
-    Math.max(0, (right.length - 1)) * separator.width;
+  const leftWidth =
+    left.reduce((s, p) => s + p.width, 0) +
+    Math.max(0, left.length - 1) * separator.width;
+  const rightWidth =
+    right.reduce((s, p) => s + p.width, 0) +
+    Math.max(0, right.length - 1) * separator.width;
 
   const gap = totalWidth - leftWidth - rightWidth;
   const gapStr = gap > 0 ? " ".repeat(gap) : "";

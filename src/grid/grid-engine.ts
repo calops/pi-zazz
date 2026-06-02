@@ -3,9 +3,9 @@ import type {
   ColumnLayout,
   GridConfig,
   HeightConstraint,
-  LayoutPlan,
   RowConfig,
   RowLayout,
+  LayoutPlan,
 } from "./types.ts";
 
 /**
@@ -62,23 +62,19 @@ function allocateHeights(
 
     if (growRows.length > 0) {
       const perRow = Math.floor(remaining / growRows.length);
-
       for (const { height, index } of growRows) {
         const capped = clampExtra(perRow, heights[index]!, height);
         heights[index] = heights[index]! + capped;
         remaining -= capped;
       }
-
       if (remaining > 0 && growRows.length > 0) {
         const first = growRows[0]!;
         const capped = clampExtra(remaining, heights[first.index]!, first.height);
         heights[first.index] = heights[first.index]! + capped;
-        remaining -= capped;
       }
     }
   }
 
-  used = heights.reduce((sum, h) => sum + h, 0);
   if (used > termHeight) {
     for (let i = rowConfigs.length - 1; i >= 0; i--) {
       const h = rowConfigs[i]!.height;
@@ -142,9 +138,7 @@ function distributeWidths(
     (sum, c) => sum + (c.width.fraction ?? 0),
     0,
   );
-
-  const effectiveTotal =
-    totalFractions > 0 ? totalFractions : columns.length;
+  const effectiveTotal = totalFractions > 0 ? totalFractions : columns.length;
 
   const mins = columns.map((c) => c.width.min ?? 1);
   const totalMins = mins.reduce((s, m) => s + m, 0);
