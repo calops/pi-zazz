@@ -76,8 +76,10 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.addAutocompleteProvider?.((current) => {
 			deps.autocompleteProvider = current;
 			return {
-						getSuggestions: (lines, line, col, opts) => current.getSuggestions(lines, line, col, opts),
-						applyCompletion: (lines, line, col, item, prefix) => current.applyCompletion(lines, line, col, item, prefix),
+				getSuggestions: (lines, line, col, opts) =>
+					current.getSuggestions(lines, line, col, opts),
+				applyCompletion: (lines, line, col, item, prefix) =>
+					current.applyCompletion(lines, line, col, item, prefix),
 			};
 		});
 
@@ -95,7 +97,13 @@ export default function (pi: ExtensionAPI) {
 		// the real keybindings from pi (required by CustomEditor.handleInput).
 		ctx.ui.setEditorComponent?.((tui, theme, keybindings) => {
 			const widgetDeps = { ...deps, keybindings } as unknown as WidgetDeps;
-			grid = new GridComponent(tui, theme, keybindings, widgetDeps, activeGridConfig);
+			grid = new GridComponent(
+				tui,
+				theme,
+				keybindings,
+				widgetDeps,
+				activeGridConfig,
+			);
 			// Inject gridRef so the editor widget can sync text on submit
 			deps.gridRef = grid;
 			return grid;
