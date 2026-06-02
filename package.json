@@ -1,0 +1,28 @@
+{
+  "name": "pi-zazz",
+  "version": "0.1.0",
+  "description": "Fancy editor UI extension for pi coding agent",
+  "type": "module",
+  "files": ["*.ts", "*.md", "*.json"],
+  "keywords": ["pi-package", "pi", "coding-agent", "editor", "extension"],
+  "license": "MIT",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "format": "biome check --write",
+    "format:check": "biome check"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-tui": ">=0.74.0 <0.76.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-coding-agent": ">=0.74.0 <0.76.0",
+    "@earendil-works/pi-tui": ">=0.74.0 <0.76.0",
+    "typescript": "^5.8.0"
+  },
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  }
+}
