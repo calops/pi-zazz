@@ -33,7 +33,6 @@
             ];
 
             shellHook = ''
-              export PATH="$PWD/node_modules/.bin:$PATH"
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
               echo "  pi-zazz devshell"
               echo "  Node $(node --version)"
