@@ -83,14 +83,13 @@ export default function (pi: ExtensionAPI) {
 			};
 		});
 
-		completionEngine = new CompletionEngine((component, opts) => {
-			const handle = (
-				ctx.ui as unknown as {
-					custom: (comp: unknown, o: unknown) => { close?: () => void };
-				}
-			).custom(component, opts);
-			return { close: () => handle.close?.() };
-		});
+		completionEngine = new CompletionEngine((factory, opts) => {
+		return (
+			ctx.ui as unknown as {
+				custom: (f: (tui: unknown, theme: unknown, kb: unknown, close: (r: unknown) => void) => unknown, o: unknown) => Promise<unknown>;
+			}
+		).custom(factory, opts);
+	});
 		deps.completionEngine = completionEngine;
 
 		// Replace editor — construct GridComponent inside the factory so it receives
