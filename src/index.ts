@@ -67,14 +67,6 @@ export default function (pi: ExtensionAPI) {
 			keybindings: undefined as unknown,
 		};
 
-		grid = new GridComponent(
-			deps.tui as never,
-			ctx.ui.theme as never,
-			deps.keybindings as never,
-			deps,
-			activeGridConfig,
-		);
-
 		completionEngine = new CompletionEngine((component, opts) => {
 			const handle = (
 				ctx.ui as unknown as {
@@ -84,8 +76,18 @@ export default function (pi: ExtensionAPI) {
 			return { close: () => handle.close?.() };
 		});
 
-		// Replace editor
-		ctx.ui.setEditorComponent?.(() => grid!);
+		// Replace editor — construct GridComponent inside the factory so it receives
+		// the real keybindings from pi (required by CustomEditor.handleInput).
+		ctx.ui.setEditorComponent?.((tui, theme, keybindings) => {
+			grid = new GridComponent(
+				tui,
+				theme,
+				keybindings,
+				{ ...deps, keybindings },
+				activeGridConfig,
+			);
+			return grid;
+		});
 
 		ctx.ui.notify("pi-zazz loaded ✨", "info");
 	});
