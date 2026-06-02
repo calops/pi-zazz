@@ -11,6 +11,7 @@ import "./widgets/lens-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
 
 import { CompletionEngine } from "./completion/completion-engine.ts";
+import type { WidgetDeps } from "./widgets/types.ts";
 
 export default function (pi: ExtensionAPI) {
 	let grid: GridComponent | null = null;
@@ -61,13 +62,24 @@ export default function (pi: ExtensionAPI) {
 			// Non-critical
 		}
 
-		const deps = {
+		const deps: Record<string, unknown> = {
 			pi: pi as unknown,
 			tui: ctx.ui as never,
 			theme: ctx.ui.theme as { fg: (c: string, t: string) => string },
-			keybindings: undefined as unknown,
-			completionEngine: undefined as CompletionEngine | undefined,
+			keybindings: undefined,
+			completionEngine: undefined,
+			autocompleteProvider: undefined,
+			gridRef: undefined,
 		};
+
+		// Capture the existing autocomplete provider chain from pi
+		ctx.ui.addAutocompleteProvider?.((current) => {
+			deps.autocompleteProvider = current;
+			return {
+						getSuggestions: (lines, line, col, opts) => current.getSuggestions(lines, line, col, opts),
+						applyCompletion: (lines, line, col, item, prefix) => current.applyCompletion(lines, line, col, item, prefix),
+			};
+		});
 
 		completionEngine = new CompletionEngine((component, opts) => {
 			const handle = (
@@ -82,13 +94,10 @@ export default function (pi: ExtensionAPI) {
 		// Replace editor — construct GridComponent inside the factory so it receives
 		// the real keybindings from pi (required by CustomEditor.handleInput).
 		ctx.ui.setEditorComponent?.((tui, theme, keybindings) => {
-			grid = new GridComponent(
-				tui,
-				theme,
-				keybindings,
-				{ ...deps, keybindings },
-				activeGridConfig,
-			);
+			const widgetDeps = { ...deps, keybindings } as unknown as WidgetDeps;
+			grid = new GridComponent(tui, theme, keybindings, widgetDeps, activeGridConfig);
+			// Inject gridRef so the editor widget can sync text on submit
+			deps.gridRef = grid;
 			return grid;
 		});
 
