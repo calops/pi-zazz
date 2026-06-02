@@ -23,6 +23,7 @@
         in
         {
           devShells.default = pkgs.mkShell {
+            name = "pi-zazz";
             packages = [
               nodejs
               pkgs.typescript
