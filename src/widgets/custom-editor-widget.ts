@@ -187,8 +187,8 @@ export const customEditorWidgetFactory: WidgetFactory = (
 				termHeight,
 				editorWidth,
 				{
-					fg: (c: string, t: string) => deps.theme.fg(c, t),
-					bg: (c: string, t: string) => deps.theme.fg(c, t),
+					fg: (c: string, t: string) => (deps.theme as { fg: (c: string, t: string) => string; bg: (c: string, t: string) => string }).fg(c, t),
+					bg: (c: string, t: string) => (deps.theme as { fg: (c: string, t: string) => string; bg: (c: string, t: string) => string }).bg(c, t),
 				},
 				state.cursorLine + 2,
 			);
