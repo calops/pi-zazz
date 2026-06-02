@@ -1,51 +1,32 @@
-import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory } from "./types.ts";
 
+/**
+ * EditorWidget renders the built-in editor content.
+ * When used outside GridComponent, shows placeholder text.
+ * Inside GridComponent, the GridComponent handles editor cells specially
+ * by calling CustomEditor.render() directly (see GridComponent.createEditorWidget()).
+ */
 export const editorWidgetFactory: WidgetFactory = (
 	deps: WidgetDeps,
 	_config: unknown,
 ) => {
-	let baseEditor: CustomEditor | undefined;
-
-	try {
-		const pi = deps.pi as {
-			getEditorComponent?: () => (...args: never[]) => CustomEditor | undefined;
-		};
-		const currentFactory = pi.getEditorComponent?.();
-		if (currentFactory) {
-			const comp = currentFactory(
-				deps.tui as never,
-				deps.theme as never,
-				deps.keybindings as never,
-			);
-			if (comp instanceof CustomEditor) baseEditor = comp;
-		}
-	} catch {
-		// Will use fallback rendering
-	}
-
 	return {
 		render(width: number, height: number): string[] {
-			if (baseEditor) {
-				const lines = baseEditor.render(width);
-				if (lines.length === 0) return [deps.theme.fg("dim", "…")];
-				return lines.slice(0, height);
+			// When used standalone (non-grid context), show placeholder
+			const lines: string[] = [];
+			lines.push(deps.theme.fg("dim", "editor"));
+			for (let i = 1; i < height; i++) {
+				lines.push(deps.theme.fg("dim", "~"));
 			}
-			return [deps.theme.fg("dim", "editor loading…")];
+			// Pad each line to width
+			return lines.map((l) => {
+				const pad = width - [...l].length;
+				return pad > 0 ? l + " ".repeat(pad) : l;
+			});
 		},
 
-		handleInput(data: string): boolean {
-			if (baseEditor) {
-				baseEditor.handleInput(data);
-				return true;
-			}
-			return false;
-		},
-
-		invalidate(): void {
-			baseEditor?.invalidate();
-		},
+		invalidate(): void {},
 	};
 };
 
