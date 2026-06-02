@@ -1,7 +1,3 @@
-import {
-	CustomEditor,
-	type KeybindingsManager,
-} from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { WidgetDeps, WidgetInstance } from "../widgets/types.ts";
@@ -10,167 +6,147 @@ import { computeLayout } from "./grid-engine.ts";
 import type { GridConfig, GridCellInfo } from "./types.ts";
 
 /**
- * GridComponent extends pi's CustomEditor. It replaces the default editor
- * via ctx.ui.setEditorComponent(). The grid engine allocates space, then
- * each widget renders into its allocated cell.
+ * GridComponent is a pure renderer for the grid layout.
+ * It allocates space and delegates each cell to its widget.
+ * Input handling is delegated to the active editor widget.
+ * No longer extends CustomEditor — the overlay handles all input routing.
  */
-export class GridComponent extends CustomEditor {
-	private config: GridConfig;
-	private deps: WidgetDeps;
-	private widgets: Map<string, WidgetInstance> = new Map();
-	private borderColorFn: (text: string) => string;
+export class GridComponent {
+  private config: GridConfig;
+  private deps: WidgetDeps;
+  private widgets: Map<string, WidgetInstance> = new Map();
+  private borderColorFn: (text: string) => string;
+  private onInvalidate: (() => void) | null = null;
 
-	constructor(
-		tui: TUI,
-		theme: EditorTheme,
-		keybindings: KeybindingsManager,
-		deps: WidgetDeps,
-		config: GridConfig,
-	) {
-		super(tui, theme, keybindings);
-		this.config = config;
-		this.deps = deps;
-		this.borderColorFn = deps.theme.fg.bind(deps.theme, "border");
-	}
+  constructor(
+    tui: TUI,
+    _theme: EditorTheme,
+    _keybindings: unknown,
+    deps: WidgetDeps,
+    config: GridConfig,
+  ) {
+    this.config = config;
+    this.deps = deps;
+    this.borderColorFn = deps.theme.fg.bind(deps.theme, "border");
+    // Store tui for requestRender
+    (deps as unknown as Record<string, unknown>).tui = tui;
+    // Store grid ref so editor widget can sync text on submit
+    (deps as unknown as Record<string, unknown>).gridRef = this;
+  }
 
-	override render(width: number): string[] {
-		const termHeight = this.deps.tui.termHeight ?? 24;
-		const plan = computeLayout(this.config, width, termHeight);
+  render(width: number): string[] {
+    const termHeight = (this.deps.tui as { termHeight?: number }).termHeight ?? 24;
+    const plan = computeLayout(this.config, width, termHeight);
 
-		if (plan.fallback) {
-			return super.render(width);
-		}
+    if (plan.fallback) return [];
 
-		let terminalRow = 0;
-		const allLines: string[] = [];
+    let terminalRow = 0;
+    const allLines: string[] = [];
 
-		for (const row of plan.rows) {
-			if (row.stacked) {
-				const perColHeight = Math.max(
-					1,
-					Math.floor(row.height / row.columns.length),
-				);
-				for (let ci = 0; ci < row.columns.length; ci++) {
-					const col = row.columns[ci]!;
-					const widget = this.getWidget(col.id, row.id, ci, terminalRow, 0);
-					const lines = widget.render(col.width, perColHeight);
-					for (const line of lines) {
-						allLines.push(this.clampLine(line, width));
-					}
-					terminalRow += perColHeight;
-				}
-			} else {
-				let maxCellHeight = 0;
-				const cellLines: string[][] = [];
+    for (const row of plan.rows) {
+      if (row.stacked) {
+        const perColHeight = Math.max(1, Math.floor(row.height / row.columns.length));
+        for (let ci = 0; ci < row.columns.length; ci++) {
+          const col = row.columns[ci]!;
+          const widget = this.getWidget(col.id, row.id, ci, terminalRow, 0);
+          const lines = widget.render(col.width, perColHeight);
+          for (const line of lines) allLines.push(this.clampLine(line, width));
+          terminalRow += perColHeight;
+        }
+      } else {
+        let maxCellHeight = 0;
+        const cellLines: string[][] = [];
+        for (let ci = 0; ci < row.columns.length; ci++) {
+          const col = row.columns[ci]!;
+          const borderOffset = col.borderLeft ? 1 : 0;
+          const widget = this.getWidget(col.id, row.id, ci, terminalRow, borderOffset);
+          const lines = widget.render(col.width, row.height);
+          cellLines.push(lines);
+          maxCellHeight = Math.max(maxCellHeight, lines.length);
+        }
+        const effectiveHeight = Math.max(maxCellHeight, row.height);
+        for (let lineIdx = 0; lineIdx < effectiveHeight; lineIdx++) {
+          let composed = "";
+          for (let ci = 0; ci < row.columns.length; ci++) {
+            const col = row.columns[ci]!;
+            if (col.borderLeft) composed += this.borderColorFn("│");
+            const cellLine = cellLines[ci]![lineIdx] ?? "";
+            composed += this.clampLine(cellLine, col.width);
+          }
+          allLines.push(this.clampLine(composed, width));
+        }
+        terminalRow += effectiveHeight;
+      }
+    }
+    return allLines;
+  }
 
-				for (let ci = 0; ci < row.columns.length; ci++) {
-					const col = row.columns[ci]!;
-					const borderOffset = col.borderLeft ? 1 : 0;
-					const widget = this.getWidget(
-						col.id,
-						row.id,
-						ci,
-						terminalRow,
-						borderOffset,
-					);
-					const lines = widget.render(col.width, row.height);
-					cellLines.push(lines);
-					maxCellHeight = Math.max(maxCellHeight, lines.length);
-				}
+  invalidate(): void {
+    for (const widget of this.widgets.values()) widget.invalidate();
+    this.onInvalidate?.();
+  }
 
-				const effectiveHeight = Math.max(maxCellHeight, row.height);
-				for (let lineIdx = 0; lineIdx < effectiveHeight; lineIdx++) {
-					let composed = "";
-					for (let ci = 0; ci < row.columns.length; ci++) {
-						const col = row.columns[ci]!;
-						if (col.borderLeft) {
-							composed += this.borderColorFn("│");
-						}
-						const cellLine = cellLines[ci]![lineIdx] ?? "";
-						composed += this.clampLine(cellLine, col.width);
-					}
-					allLines.push(this.clampLine(composed, width));
-				}
-				terminalRow += effectiveHeight;
-			}
-		}
+  /**
+   * Forward input to the editor widget.
+   * Returns true if the editor widget consumed the input.
+   */
+  handleInput(data: string): boolean {
+    const editorWidget = this.widgets.get("main:editor");
+    if (editorWidget?.handleInput?.(data)) return true;
+    return false;
+  }
 
-		return allLines;
-	}
+  /** Allow the editor widget to sync text before submit */
+  setText(_text: string): void {
+    // The editor widget calls this to sync before letting
+    // Enter bubble up to the overlay for submission via pi
+    // (Future: wire to pi's message submission)
+  }
 
-	override invalidate(): void {
-		for (const widget of this.widgets.values()) {
-			widget.invalidate();
-		}
-		super.invalidate();
-	}
+  getText(): string {
+    return "";
+  }
 
-	override handleInput(data: string): void {
-		// Forward input to the editor widget first, then fallback to CustomEditor
-		const editorWidget = this.widgets.get("main:editor");
-		if (editorWidget?.handleInput?.(data)) return;
-		super.handleInput(data);
-	}
+  setConfig(config: GridConfig): void {
+    this.config = config;
+    this.widgets.clear();
+    this.invalidate();
+  }
 
-	/** Reconfigure the grid at runtime */
-	setConfig(config: GridConfig): void {
-		this.config = config;
-		this.widgets.clear();
-		this.invalidate();
-	}
+  setOnInvalidate(fn: () => void): void {
+    this.onInvalidate = fn;
+  }
 
-	private getWidget(
-		colId: string,
-		rowId: string,
-		colIndex: number,
-		terminalRow: number,
-		terminalCol: number,
-	): WidgetInstance {
-		const key = `${rowId}:${colId}`;
-		let widget = this.widgets.get(key);
-		if (!widget) {
-			const rowCfg = this.config.rows.find((r) => r.id === rowId);
-			const colConfig = rowCfg?.columns[colIndex];
-			if (!colConfig)
-				throw new Error(`Column ${colId} not found in row ${rowId}`);
+  private getWidget(
+    colId: string, rowId: string, colIndex: number,
+    terminalRow: number, terminalCol: number,
+  ): WidgetInstance {
+    const key = `${rowId}:${colId}`;
+    let widget = this.widgets.get(key);
+    if (!widget) {
+      const rowCfg = this.config.rows.find((r) => r.id === rowId);
+      const colConfig = rowCfg?.columns[colIndex];
+      if (!colConfig) throw new Error(`Column ${colId} not found in row ${rowId}`);
+      const cellInfo: GridCellInfo = {
+        row: this.config.rows.findIndex((r) => r.id === rowId),
+        col: colIndex, rowId, colId, terminalRow, terminalCol,
+      };
+      widget = createFromConfig(colConfig, this.deps, cellInfo);
+      this.widgets.set(key, widget);
+    }
+    return widget;
+  }
 
-			const cellInfo: GridCellInfo = {
-				row: this.config.rows.findIndex((r) => r.id === rowId),
-				col: colIndex,
-				rowId,
-				colId,
-				terminalRow,
-				terminalCol,
-			};
-			widget = createFromConfig(colConfig, this.deps, cellInfo);
-			this.widgets.set(key, widget);
-		}
-		return widget;
-	}
-
-	private clampLine(line: string, width: number): string {
-		const vw = visibleWidth(line);
-		if (vw <= width) {
-			return line + " ".repeat(width - vw);
-		}
-		let result = "";
-		let pos = 0;
-		let inEscape = false;
-		for (const ch of line) {
-			if (inEscape) {
-				result += ch;
-				if (ch === "m") inEscape = false;
-				continue;
-			}
-			if (ch === "\x1b") {
-				inEscape = true;
-				result += ch;
-				continue;
-			}
-			if (pos >= width) break;
-			result += ch;
-			pos++;
-		}
-		return result;
-	}
+  private clampLine(line: string, width: number): string {
+    const vw = visibleWidth(line);
+    if (vw <= width) return line + " ".repeat(width - vw);
+    let result = ""; let pos = 0; let inEscape = false;
+    for (const ch of line) {
+      if (inEscape) { result += ch; if (ch === "m") inEscape = false; continue; }
+      if (ch === "\x1b") { inEscape = true; result += ch; continue; }
+      if (pos >= width) break;
+      result += ch; pos++;
+    }
+    return result;
+  }
 }

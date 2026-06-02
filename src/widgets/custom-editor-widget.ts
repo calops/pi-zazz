@@ -1,369 +1,357 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory, WidgetInstance } from "./types.ts";
-import type { CompletionItem } from "../completion/completion-popup.ts";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-interface EditorState {
-	lines: string[];
-	cursorLine: number;
-	cursorCol: number;
-	scrollOffset: number;
+interface CompletionItem {
+  value: string;
+  label: string;
+  description?: string;
 }
 
 interface AutocompleteProvider {
-	getSuggestions(
-		lines: string[],
-		cursorLine: number,
-		cursorCol: number,
-		options: { signal?: AbortSignal },
-	): Promise<{ prefix: string; items: CompletionItem[] } | null>;
-	applyCompletion(
-		lines: string[],
-		cursorLine: number,
-		cursorCol: number,
-		item: CompletionItem,
-		prefix: string,
-	): { lines: string[]; cursorLine: number; cursorCol: number };
+  getSuggestions(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    options: { signal?: AbortSignal },
+  ): Promise<{ prefix: string; items: CompletionItem[] } | null>;
+  applyCompletion(
+    lines: string[],
+    cursorLine: number,
+    cursorCol: number,
+    item: CompletionItem,
+    prefix: string,
+  ): { lines: string[]; cursorLine: number; cursorCol: number };
+}
+
+interface EditorState {
+  lines: string[];
+  cursorLine: number;
+  cursorCol: number;
+  scrollOffset: number;
+  /** Active completion state */
+  completions: CompletionItem[] | null;
+  completionIdx: number;
+  completionPrefix: string;
 }
 
 // ── Key helpers ────────────────────────────────────────────────────
 
-enum Arrow {
-	Up = "\x1b[A",
-	Down = "\x1b[B",
-	Right = "\x1b[C",
-	Left = "\x1b[D",
-}
-
-function isArrow(data: string, dir: string): boolean {
-	return data === dir;
-}
-
 function isPrintable(data: string): boolean {
-	const code = data.codePointAt(0);
-	return code !== undefined && (code >= 0x20 || code === 0x0d || code === 0x0a);
+  const code = data.codePointAt(0);
+  return code !== undefined && (code >= 0x20 || code === 0x0d || code === 0x0a);
 }
 
-function isAutocompleteTrigger(
-	data: string,
-	_line: string,
-	col: number,
-): boolean {
-	if (data === "\t") return true;
-	// Slash at start of line or after whitespace
-	if (data === "/" && col === 0) return true;
-	// @ anywhere
-	if (data === "@") return true;
-	return false;
+function isAutocompleteTrigger(data: string, col: number): boolean {
+  if (data === "\t") return true;
+  if (data === "/" && col === 0) return true;
+  if (data === "@") return true;
+  return false;
 }
 
 // ── Editor Widget ───────────────────────────────────────────────────
 
 export const customEditorWidgetFactory: WidgetFactory = (
-	deps: WidgetDeps,
-	_config: unknown,
+  deps: WidgetDeps,
+  _config: unknown,
 ) => {
-	const state: EditorState = {
-		lines: [""],
-		cursorLine: 0,
-		cursorCol: 0,
-		scrollOffset: 0,
-	};
+  const state: EditorState = {
+    lines: [""],
+    cursorLine: 0,
+    cursorCol: 0,
+    scrollOffset: 0,
+    completions: null,
+    completionIdx: 0,
+    completionPrefix: "",
+  };
 
-	const completionEngine = deps.completionEngine;
-	const autocompleteProvider: AutocompleteProvider | null =
-		(deps as { autocompleteProvider?: AutocompleteProvider })
-			.autocompleteProvider ?? null;
-	const gridRef = (
-		deps as {
-			gridRef?: { setText: (t: string) => void; getText: () => string };
-		}
-	).gridRef;
+  const autocompleteProvider: AutocompleteProvider | null =
+    (deps as { autocompleteProvider?: AutocompleteProvider }).autocompleteProvider ?? null;
+  const submitFn: ((text: string) => void) | null =
+    (deps as { submitFn?: (text: string) => void }).submitFn ?? null;
 
-	// ── Cursor / buffer helpers ───────────────────────────────────────
+  // ── Buffer helpers ────────────────────────────────────────────────
 
-	function clampCursor(): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		if (state.cursorCol > line.length) state.cursorCol = line.length;
-		if (state.cursorCol < 0) state.cursorCol = 0;
-	}
+  function clampCursor(): void {
+    const line = state.lines[state.cursorLine] ?? "";
+    if (state.cursorCol > line.length) state.cursorCol = line.length;
+    if (state.cursorCol < 0) state.cursorCol = 0;
+  }
 
-	function insertChar(ch: string): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		state.lines[state.cursorLine] =
-			line.slice(0, state.cursorCol) + ch + line.slice(state.cursorCol);
-		state.cursorCol += ch.length;
-	}
+  function insertChar(ch: string): void {
+    const line = state.lines[state.cursorLine] ?? "";
+    state.lines[state.cursorLine] = line.slice(0, state.cursorCol) + ch + line.slice(state.cursorCol);
+    state.cursorCol += ch.length;
+  }
 
-	function insertNewline(): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		const before = line.slice(0, state.cursorCol);
-		const after = line.slice(state.cursorCol);
-		state.lines[state.cursorLine] = before;
-		state.lines.splice(state.cursorLine + 1, 0, after);
-		state.cursorLine++;
-		state.cursorCol = 0;
-	}
+  function deleteBefore(): void {
+    if (state.cursorCol > 0) {
+      const line = state.lines[state.cursorLine] ?? "";
+      state.lines[state.cursorLine] = line.slice(0, state.cursorCol - 1) + line.slice(state.cursorCol);
+      state.cursorCol--;
+    } else if (state.cursorLine > 0) {
+      const prev = state.lines[state.cursorLine - 1] ?? "";
+      const curr = state.lines[state.cursorLine] ?? "";
+      state.cursorCol = prev.length;
+      state.lines[state.cursorLine - 1] = prev + curr;
+      state.lines.splice(state.cursorLine, 1);
+      state.cursorLine--;
+    }
+  }
 
-	function deleteBefore(): void {
-		if (state.cursorCol > 0) {
-			const line = state.lines[state.cursorLine] ?? "";
-			state.lines[state.cursorLine] =
-				line.slice(0, state.cursorCol - 1) + line.slice(state.cursorCol);
-			state.cursorCol--;
-		} else if (state.cursorLine > 0) {
-			const prevLine = state.lines[state.cursorLine - 1] ?? "";
-			const currLine = state.lines[state.cursorLine] ?? "";
-			state.cursorCol = prevLine.length;
-			state.lines[state.cursorLine - 1] = prevLine + currLine;
-			state.lines.splice(state.cursorLine, 1);
-			state.cursorLine--;
-		}
-	}
+  function deleteForward(): void {
+    const line = state.lines[state.cursorLine] ?? "";
+    if (state.cursorCol < line.length) {
+      state.lines[state.cursorLine] = line.slice(0, state.cursorCol) + line.slice(state.cursorCol + 1);
+    } else if (state.cursorLine < state.lines.length - 1) {
+      const next = state.lines[state.cursorLine + 1] ?? "";
+      state.lines[state.cursorLine] = line + next;
+      state.lines.splice(state.cursorLine + 1, 1);
+    }
+  }
 
-	function deleteForward(): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		if (state.cursorCol < line.length) {
-			state.lines[state.cursorLine] =
-				line.slice(0, state.cursorCol) + line.slice(state.cursorCol + 1);
-		} else if (state.cursorLine < state.lines.length - 1) {
-			const nextLine = state.lines[state.cursorLine + 1] ?? "";
-			state.lines[state.cursorLine] = line + nextLine;
-			state.lines.splice(state.cursorLine + 1, 1);
-		}
-	}
+  function deleteWordBefore(): void {
+    if (state.cursorCol === 0) { deleteBefore(); return; }
+    const line = state.lines[state.cursorLine] ?? "";
+    let pos = state.cursorCol;
+    while (pos > 0 && line[pos - 1] === " ") pos--;
+    while (pos > 0 && line[pos - 1] !== " ") pos--;
+    state.lines[state.cursorLine] = line.slice(0, pos) + line.slice(state.cursorCol);
+    state.cursorCol = pos;
+  }
 
-	function deleteWordBefore(): void {
-		if (state.cursorCol === 0) {
-			deleteBefore();
-			return;
-		}
-		const line = state.lines[state.cursorLine] ?? "";
-		let pos = state.cursorCol;
-		while (pos > 0 && line[pos - 1] === " ") pos--;
-		while (pos > 0 && line[pos - 1] !== " ") pos--;
-		state.lines[state.cursorLine] =
-			line.slice(0, pos) + line.slice(state.cursorCol);
-		state.cursorCol = pos;
-	}
+  function getFullText(): string { return state.lines.join("\n"); }
 
-	function getFullText(): string {
-		return state.lines.join("\n");
-	}
+  function submitText(): void {
+    const text = getFullText();
+    state.lines = [""];
+    state.cursorLine = 0;
+    state.cursorCol = 0;
+    if (submitFn) submitFn(text);
+  }
 
-	function submitText(): void {
-		const text = getFullText();
-		// Sync text to GridComponent's native buffer so super.handleInput("\r")
-		// can read it and trigger the built-in submit pipeline via Editor.onSubmit.
-		gridRef?.setText(text);
-		// Clear our buffer
-		state.lines = [""];
-		state.cursorLine = 0;
-		state.cursorCol = 0;
-	}
+  // ── Completions ───────────────────────────────────────────────────
 
-	// ── Autocomplete ──────────────────────────────────────────────────
+  function dismissCompletions(): void {
+    state.completions = null;
+    state.completionIdx = 0;
+    state.completionPrefix = "";
+  }
 
-	async function triggerAutocomplete(): Promise<void> {
-		if (!autocompleteProvider || completionEngine?.isActive) return;
+  async function triggerAutocomplete(): Promise<void> {
+    if (!autocompleteProvider) return;
+    const abort = new AbortController();
+    const result = await autocompleteProvider.getSuggestions(
+      state.lines, state.cursorLine, state.cursorCol,
+      { signal: abort.signal },
+    );
+    if (result && result.items.length > 0) {
+      state.completions = result.items;
+      state.completionIdx = 0;
+      state.completionPrefix = result.prefix;
+    } else {
+      dismissCompletions();
+    }
+  }
 
-		const abortController = new AbortController();
-		const result = await autocompleteProvider.getSuggestions(
-			state.lines,
-			state.cursorLine,
-			state.cursorCol,
-			{ signal: abortController.signal },
-		);
+  function applySelectedCompletion(): void {
+    if (!state.completions || !autocompleteProvider) return;
+    const item = state.completions[state.completionIdx];
+    if (!item) return;
+    const newState = autocompleteProvider.applyCompletion(
+      state.lines, state.cursorLine, state.cursorCol,
+      item, state.completionPrefix,
+    );
+    state.lines = newState.lines;
+    state.cursorLine = newState.cursorLine;
+    state.cursorCol = newState.cursorCol;
+    dismissCompletions();
+    clampCursor();
+  }
 
-		if (result && result.items.length > 0) {
-			const prefix = result.prefix;
-			const termHeight = deps.tui.termHeight ?? 24;
-			const editorWidth = 60; // approximate, will be adjusted
+  // ── Rendering ─────────────────────────────────────────────────────
 
-			completionEngine?.show(
-				result.items,
-				termHeight,
-				editorWidth,
-				{
-					fg: (c: string, t: string) => (deps.theme as { fg: (c: string, t: string) => string; bg: (c: string, t: string) => string }).fg(c, t),
-					bg: (c: string, t: string) => (deps.theme as { fg: (c: string, t: string) => string; bg: (c: string, t: string) => string }).bg(c, t),
-				},
-				state.cursorLine + 2,
-			);
+  function renderCompletionPopup(width: number): string[] {
+    if (!state.completions || state.completions.length === 0) return [];
 
-			completionEngine!.onApply = (selectedValue: string) => {
-				const selected =
-					result.items.find((i) => i.value === selectedValue) ??
-					result.items[0]!;
-				const newState = autocompleteProvider.applyCompletion(
-					state.lines,
-					state.cursorLine,
-					state.cursorCol,
-					selected,
-					prefix,
-				);
-				state.lines = newState.lines;
-				state.cursorLine = newState.cursorLine;
-				state.cursorCol = newState.cursorCol;
-				clampCursor();
-			};
-		}
-	}
+    const dim = (s: string) => deps.theme.fg("dim", s);
+    const accent = (s: string) => deps.theme.fg("accent", s);
+    const muted = (s: string) => deps.theme.fg("muted", s);
+    const maxH = Math.min(state.completions.length, 6);
+    const items = state.completions.slice(0, maxH);
+    const w = Math.max(30, Math.min(width - 4, 70));
 
-	const instance: WidgetInstance = {
-		render(width: number, height: number): string[] {
-			clampCursor();
-			const lines: string[] = [];
+    const lines: string[] = [];
+    const hz = (c: string) => dim(c.repeat(w));
+    lines.push(dim("╭") + hz("─") + dim("╮"));
 
-			if (state.cursorLine < state.scrollOffset)
-				state.scrollOffset = state.cursorLine;
-			const maxVisible = height;
-			if (state.cursorLine >= state.scrollOffset + maxVisible) {
-				state.scrollOffset = state.cursorLine - maxVisible + 1;
-			}
-			if (state.scrollOffset < 0) state.scrollOffset = 0;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
+      const sel = i === state.completionIdx ? accent("▶") : " ";
+      let row = ` ${sel} ${item.label}`;
+      if (item.description) row += muted(`  ${item.description}`);
+      lines.push(dim("│") + padLine(row, w) + dim("│"));
+    }
 
-			const visibleLines = state.lines.slice(
-				state.scrollOffset,
-				state.scrollOffset + maxVisible,
-			);
+    lines.push(dim("╰") + hz("─") + dim("╯"));
+    return lines;
+  }
 
-			for (let i = 0; i < visibleLines.length; i++) {
-				const lineIdx = state.scrollOffset + i;
-				const text = visibleLines[i] ?? "";
+  function renderEditorText(width: number, height: number): string[] {
+    clampCursor();
+    const lines: string[] = [];
 
-				if (lineIdx === state.cursorLine) {
-					const before = text.slice(0, state.cursorCol);
-					const at = text[state.cursorCol] ?? " ";
-					const after = text.slice(state.cursorCol + 1);
-					const cursor = deps.theme.fg("accent", `\x1b[7m${at}\x1b[27m`);
-					lines.push(padLine(`> ${before}${cursor}${after}`, width));
-				} else {
-					lines.push(padLine(`  ${text}`, width));
-				}
-			}
+    const popupLines = renderCompletionPopup(width);
+    const popupH = popupLines.length;
+    const editH = height - popupH;
 
-			for (let i = lines.length; i < height; i++) {
-				lines.push(
-					deps.theme.fg("dim", "~") + " ".repeat(Math.max(0, width - 1)),
-				);
-			}
+    // Popup goes above the editor area
+    for (const pl of popupLines) lines.push(pl);
 
-			return lines;
-		},
+    // Scroll to keep cursor in the remaining editor area
+    if (state.cursorLine < state.scrollOffset) state.scrollOffset = state.cursorLine;
+    if (state.cursorLine >= state.scrollOffset + editH) {
+      state.scrollOffset = state.cursorLine - editH + 1;
+    }
+    if (state.scrollOffset < 0) state.scrollOffset = 0;
 
-		handleInput(data: string): boolean {
-			if (completionEngine?.isActive) return true;
+    const visible = state.lines.slice(state.scrollOffset, state.scrollOffset + editH);
 
-			if (data === "\r" || data === "\n") {
-				if (state.lines.length > 1) {
-					insertNewline();
-					return true;
-				}
-				submitText();
-				return false; // let GridComponent.super.handleInput("\r") submit
-			}
+    for (let i = 0; i < visible.length; i++) {
+      const li = state.scrollOffset + i;
+      const text = visible[i] ?? "";
+      if (li === state.cursorLine) {
+        const before = text.slice(0, state.cursorCol);
+        const at = text[state.cursorCol] ?? " ";
+        const after = text.slice(state.cursorCol + 1);
+        const cursor = deps.theme.fg("accent", `\x1b[7m${at}\x1b[27m`);
+        lines.push(padLine(`> ${before}${cursor}${after}`, width));
+      } else {
+        lines.push(padLine(`  ${text}`, width));
+      }
+    }
 
-			if (
-				isAutocompleteTrigger(
-					data,
-					state.lines[state.cursorLine] ?? "",
-					state.cursorCol,
-				)
-			) {
-				insertChar(data);
-				void triggerAutocomplete();
-				return true;
-			}
+    for (let i = lines.length; i < height; i++) {
+      lines.push(deps.theme.fg("dim", "~") + " ".repeat(Math.max(0, width - 1)));
+    }
 
-			if (data === "\x1b") {
-				state.lines = [""];
-				state.cursorLine = 0;
-				state.cursorCol = 0;
-				return true;
-			}
-			if (data === "\x7f" || data === "\x08") {
-				deleteBefore();
-				return true;
-			}
-			if (data === "\x1b[3~") {
-				deleteForward();
-				return true;
-			}
-			if (data === "\x17" || data === "\x1b\x7f") {
-				deleteWordBefore();
-				return true;
-			}
+    return lines;
+  }
 
-			if (isArrow(data, Arrow.Left)) {
-				if (state.cursorCol > 0) state.cursorCol--;
-				else if (state.cursorLine > 0) {
-					state.cursorLine--;
-					state.cursorCol = (state.lines[state.cursorLine] ?? "").length;
-				}
-				return true;
-			}
-			if (isArrow(data, Arrow.Right)) {
-				const ln = state.lines[state.cursorLine] ?? "";
-				if (state.cursorCol < ln.length) state.cursorCol++;
-				else if (state.cursorLine < state.lines.length - 1) {
-					state.cursorLine++;
-					state.cursorCol = 0;
-				}
-				return true;
-			}
-			if (isArrow(data, Arrow.Up)) {
-				if (state.cursorLine > 0) state.cursorLine--;
-				return true;
-			}
-			if (isArrow(data, Arrow.Down)) {
-				if (state.cursorLine < state.lines.length - 1) state.cursorLine++;
-				return true;
-			}
+  // ── Widget instance ──────────────────────────────────────────────
 
-			if (data === "\x01") {
-				state.cursorCol = 0;
-				return true;
-			}
-			if (data === "\x05") {
-				const ln2 = state.lines[state.cursorLine] ?? "";
-				state.cursorCol = ln2.length;
-				return true;
-			}
+  const instance: WidgetInstance = {
+    render(width: number, height: number): string[] {
+      return renderEditorText(width, height);
+    },
 
-			if (data === "\x0b") {
-				const ln3 = state.lines[state.cursorLine] ?? "";
-				state.lines[state.cursorLine] = ln3.slice(0, state.cursorCol);
-				return true;
-			}
-			if (data === "\x15") {
-				const ln4 = state.lines[state.cursorLine] ?? "";
-				state.lines[state.cursorLine] = ln4.slice(state.cursorCol);
-				state.cursorCol = 0;
-				return true;
-			}
+    handleInput(data: string): boolean {
+      // ── Arrow keys with completions active ──
+      if (state.completions) {
+        if (data === "\x1b[A" || data === "\x1bOA") {
+          state.completionIdx = Math.max(0, state.completionIdx - 1);
+          return true;
+        }
+        if (data === "\x1b[B" || data === "\x1bOB") {
+          state.completionIdx = Math.min(state.completions.length - 1, state.completionIdx + 1);
+          return true;
+        }
+        if (data === "\r" || data === "\n" || data === "\t") {
+          applySelectedCompletion();
+          return true;
+        }
+        if (data === "\x1b") {
+          dismissCompletions();
+          return true;
+        }
+      }
 
-			if (isPrintable(data) && data !== "\r" && data !== "\n") {
-				insertChar(data);
-				return true;
-			}
+      // ── Enter: submit ──
+      if (data === "\r" || data === "\n") {
+        if (state.lines.length > 1) {
+          // Multi-line: insert newline
+          const line = state.lines[state.cursorLine] ?? "";
+          const before = line.slice(0, state.cursorCol);
+          const after = line.slice(state.cursorCol);
+          state.lines[state.cursorLine] = before;
+          state.lines.splice(state.cursorLine + 1, 0, after);
+          state.cursorLine++;
+          state.cursorCol = 0;
+          return true;
+        }
+        submitText();
+        return false; // let GridComponent → super handle submit
+      }
 
-			return false;
-		},
+      // ── Autocomplete triggers ──
+      if (isAutocompleteTrigger(data, state.cursorCol)) {
+        insertChar(data);
+        dismissCompletions();
+        void triggerAutocomplete();
+        return true;
+      }
 
-		invalidate(): void {},
-		configure(_cfg: Record<string, unknown>): void {},
-	};
+      // ── Escape ──
+      if (data === "\x1b") {
+        state.lines = [""]; state.cursorLine = 0; state.cursorCol = 0;
+        dismissCompletions();
+        return true;
+      }
 
-	return instance;
+      // ── Deletion ──
+      if (data === "\x7f" || data === "\x08") { deleteBefore(); return true; }
+      if (data === "\x1b[3~") { deleteForward(); return true; }
+      if (data === "\x17" || data === "\x1b\x7f") { deleteWordBefore(); return true; }
+
+      // ── Navigation (no completions active) ──
+      if (data === "\x1b[D") {
+        if (state.cursorCol > 0) state.cursorCol--;
+        else if (state.cursorLine > 0) { state.cursorLine--; state.cursorCol = (state.lines[state.cursorLine] ?? "").length; }
+        return true;
+      }
+      if (data === "\x1b[C") {
+        const ln = state.lines[state.cursorLine] ?? "";
+        if (state.cursorCol < ln.length) state.cursorCol++;
+        else if (state.cursorLine < state.lines.length - 1) { state.cursorLine++; state.cursorCol = 0; }
+        return true;
+      }
+      if (data === "\x1b[A") { if (state.cursorLine > 0) state.cursorLine--; return true; }
+      if (data === "\x1b[B") { if (state.cursorLine < state.lines.length - 1) state.cursorLine++; return true; }
+
+      if (data === "\x01") { state.cursorCol = 0; return true; }
+      if (data === "\x05") { const le = state.lines[state.cursorLine] ?? ""; state.cursorCol = le.length; return true; }
+
+      // ── Kill line ──
+      if (data === "\x0b") { state.lines[state.cursorLine] = (state.lines[state.cursorLine] ?? "").slice(0, state.cursorCol); return true; }
+      if (data === "\x15") { state.lines[state.cursorLine] = (state.lines[state.cursorLine] ?? "").slice(state.cursorCol); state.cursorCol = 0; return true; }
+
+      // ── Printable ──
+      if (isPrintable(data) && data !== "\r" && data !== "\n") {
+        insertChar(data);
+        // Re-trigger completions if they were active (live filtering via provider)
+        if (state.completions) {
+          dismissCompletions();
+          void triggerAutocomplete();
+        }
+        return true;
+      }
+
+      return false;
+    },
+
+    invalidate(): void {},
+    configure(_cfg: Record<string, unknown>): void {},
+  };
+
+  return instance;
 };
 
 function padLine(line: string, width: number): string {
-	const vw = visibleWidth(line);
-	if (vw >= width) return line.slice(0, width);
-	return line + " ".repeat(width - vw);
+  const vw = visibleWidth(line);
+  if (vw >= width) return line.slice(0, width);
+  return line + " ".repeat(width - vw);
 }
 
 registerWidget("editor", customEditorWidgetFactory);

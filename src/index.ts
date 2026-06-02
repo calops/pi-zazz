@@ -4,132 +4,128 @@ import { DEFAULT_GRID } from "./default-config.ts";
 import type { GridConfig } from "./grid/types.ts";
 
 // Side-effect imports: register built-in widgets
-import "./widgets/editor-widget.ts";
 import "./widgets/custom-editor-widget.ts";
 import "./widgets/status-bar-widget.ts";
 import "./widgets/lens-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
 
-import { CompletionEngine } from "./completion/completion-engine.ts";
-import type { WidgetDeps } from "./widgets/types.ts";
-
 export default function (pi: ExtensionAPI) {
-	let grid: GridComponent | null = null;
-	let completionEngine: CompletionEngine | null = null;
-	let activeGridConfig: GridConfig = DEFAULT_GRID;
+  let activeGridConfig: GridConfig = DEFAULT_GRID;
 
-	// --- Grid config API ---
-	(pi as unknown as Record<string, unknown>).setGridConfig = (
-		config: GridConfig,
-	) => {
-		activeGridConfig = config;
-		grid?.setConfig(config);
-	};
-	(pi as unknown as Record<string, unknown>).getGridConfig = (): GridConfig => {
-		return activeGridConfig;
-	};
+  // --- Grid config API ---
+  (pi as unknown as Record<string, unknown>).setGridConfig = (config: GridConfig) => {
+    activeGridConfig = config;
+    requestRenderFn?.();
+  };
+  (pi as unknown as Record<string, unknown>).getGridConfig = (): GridConfig => activeGridConfig;
 
-	// Load user config from settings (if any)
-	try {
-		const getSettings = (
-			pi as unknown as { getSettings?: () => Record<string, unknown> }
-		).getSettings;
-		const settings = getSettings?.();
-		if (settings?.["pi-zazz"] && typeof settings["pi-zazz"] === "object") {
-			const zazzCfg = settings["pi-zazz"] as Record<string, unknown>;
-			if (zazzCfg["grid"]) {
-				activeGridConfig = {
-					...DEFAULT_GRID,
-					...(zazzCfg["grid"] as Partial<GridConfig>),
-				} as GridConfig;
-			}
-		}
-	} catch {
-		// Settings may not be available; use defaults
-	}
+  // Load user config from settings
+  try {
+    const getSettings = (pi as unknown as { getSettings?: () => Record<string, unknown> }).getSettings;
+    const settings = getSettings?.();
+    const piZazz = settings?.["pi-zazz"] as Record<string, unknown> | undefined;
+    if (piZazz?.["grid"]) {
+      activeGridConfig = { ...DEFAULT_GRID, ...(piZazz["grid"] as Partial<GridConfig>) } as GridConfig;
+    }
+  } catch { /* use defaults */ }
 
-	// --- Session lifecycle ---
-	pi.on("session_start", async (_event, ctx) => {
-		if (!ctx.hasUI) return;
+  let requestRenderFn: (() => void) | null = null;
 
-		// Hide built-in working indicator and footer
-		try {
-			ctx.ui.setWorkingVisible?.(false);
-			ctx.ui.setFooter?.(
-				() => ({ render: () => [], invalidate: () => {} }) as never,
-			);
-		} catch {
-			// Non-critical
-		}
+  // --- Session lifecycle ---
+  pi.on("session_start", async (_event, ctx) => {
+    if (!ctx.hasUI) return;
 
-		const deps: Record<string, unknown> = {
-			pi: pi as unknown,
-			tui: ctx.ui as never,
-			theme: ctx.ui.theme as { fg: (c: string, t: string) => string },
-			keybindings: undefined,
-			completionEngine: undefined,
-			autocompleteProvider: undefined,
-			gridRef: undefined,
-		};
+    // Hide built-in UI — our overlay replaces everything below the message area
+    try {
+      ctx.ui.setWorkingVisible?.(false);
+      ctx.ui.setFooter?.(() => ({ render: () => [], invalidate: () => {} }) as never);
+    } catch { /* non-critical */ }
 
-		// Capture the existing autocomplete provider chain from pi
-		ctx.ui.addAutocompleteProvider?.((current) => {
-			deps.autocompleteProvider = current;
-			return {
-				getSuggestions: (lines, line, col, opts) =>
-					current.getSuggestions(lines, line, col, opts),
-				applyCompletion: (lines, line, col, item, prefix) =>
-					current.applyCompletion(lines, line, col, item, prefix),
-			};
-		});
+    // Capture autocomplete provider chain
+    let autocompleteProvider: unknown = null;
+    ctx.ui.addAutocompleteProvider?.((current) => {
+      autocompleteProvider = current;
+      return current;
+    });
 
-		completionEngine = new CompletionEngine((factory, opts) => {
-			return (
-				ctx.ui as unknown as {
-					custom: (
-						f: (
-							tui: unknown,
-							theme: unknown,
-							kb: unknown,
-							close: (r: unknown) => void,
-						) => unknown,
-						o: unknown,
-					) => Promise<unknown>;
-				}
-			).custom(factory, opts);
-		});
-		deps.completionEngine = completionEngine;
+    // Open persistent full-window overlay
+    const ui = ctx.ui as unknown as {
+      custom: (
+        factory: (tui: unknown, theme: unknown, kb: unknown, close: (r: unknown) => void) => unknown,
+        opts: { overlay: boolean; overlayOptions?: Record<string, unknown> },
+      ) => Promise<unknown>;
+    };
 
-		// Replace editor — construct GridComponent inside the factory so it receives
-		// the real keybindings from pi (required by CustomEditor.handleInput).
-		ctx.ui.setEditorComponent?.((tui, theme, keybindings) => {
-			const widgetDeps = { ...deps, keybindings } as unknown as WidgetDeps;
-			grid = new GridComponent(
-				tui,
-				theme,
-				keybindings,
-				widgetDeps,
-				activeGridConfig,
-			);
-			// Inject gridRef so the editor widget can sync text on submit
-			deps.gridRef = grid;
-			return grid;
-		});
+    // We never call close() — the overlay stays for the entire session
+    void ui.custom((tui, theme, keybindings, _close) => {
+      // Build widget deps
+      const deps: Record<string, unknown> = {
+        pi: pi as unknown,
+        tui: tui as unknown,
+        theme: theme as { fg: (c: string, t: string) => string },
+        keybindings: keybindings as unknown,
+        autocompleteProvider,
+        submitFn: (text: string) => pi.sendUserMessage(text),
+      };
 
-		ctx.ui.notify("pi-zazz loaded ✨", "info");
-	});
+      // Create the grid — now just a render target, not a CustomEditor
+      const grid = new GridComponent(
+        tui as never,
+        theme as never,
+        keybindings as never,
+        deps as never,
+        activeGridConfig,
+      );
 
-	// --- Event wiring for reactive updates ---
-	pi.on("model_select", () => grid?.invalidate());
-	pi.on("thinking_level_select", () => grid?.invalidate());
-	pi.on("turn_start", () => grid?.invalidate());
-	pi.on("turn_end", () => grid?.invalidate());
-	pi.on("agent_start", () => grid?.invalidate());
-	pi.on("agent_end", () => grid?.invalidate());
+      requestRenderFn = () => (tui as { requestRender?: () => void }).requestRender?.();
 
-	pi.on("session_shutdown", () => {
-		completionEngine?.dismiss();
-		grid = null;
-		completionEngine = null;
-	});
+      return {
+        render: (width: number): string[] => {
+          // Compute where the grid should appear (bottom of the terminal)
+          const termHeight = (tui as { termHeight?: number }).termHeight ?? 24;
+          const gridLines = grid.render(width);
+          const gridHeight = gridLines.length;
+
+          // Build output: transparent lines above grid, grid at bottom
+          const output: string[] = [];
+          const emptyPrefix = Math.max(0, termHeight - gridHeight);
+
+          // Transparent lines (message area — pi handles these, we stay see-through)
+          for (let i = 0; i < emptyPrefix; i++) {
+            output.push(""); // empty = transparent
+          }
+
+          // Our grid (status bar + editor + pi-lens + prompt bar)
+          for (const line of gridLines) {
+            output.push(line);
+          }
+
+          return output;
+        },
+
+        handleInput: (data: string): void => {
+          grid.handleInput(data);
+        },
+
+        invalidate: (): void => {
+          grid.invalidate();
+        },
+      };
+    }, {
+      overlay: true,
+      overlayOptions: {
+        anchor: "bottom-left",
+        width: "100%",
+        height: "100%",
+      },
+    });
+  });
+
+  // --- Event wiring for reactive updates ---
+  pi.on("model_select", () => requestRenderFn?.());
+  pi.on("thinking_level_select", () => requestRenderFn?.());
+  pi.on("turn_start", () => requestRenderFn?.());
+  pi.on("turn_end", () => requestRenderFn?.());
+  pi.on("agent_start", () => requestRenderFn?.());
+  pi.on("agent_end", () => requestRenderFn?.());
 }
