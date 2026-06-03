@@ -69,6 +69,8 @@ export type SegmentId =
 export interface RenderedSegment {
 	text: string;
 	visible: boolean;
+	/** Optional sub-pill shown on the right (e.g., thinking level for the model pill) */
+	rightExtension?: string;
 }
 
 function formatTokens(n: number): string {
@@ -99,16 +101,17 @@ export const SEGMENTS: Record<
 	model(ctx): RenderedSegment {
 		let name = ctx.model?.name ?? ctx.model?.id ?? "no-model";
 		if (name.startsWith("Claude ")) name = name.slice(7);
-		let content = withIcon(icon("model"), name);
+		const content = withIcon(icon("model"), name);
 		const opts = ctx.options.model ?? {};
+		let rightExtension: string | undefined;
 		if (
 			opts.showThinkingLevel !== false &&
 			ctx.model?.reasoning &&
 			ctx.thinkingLevel !== "off"
 		) {
-			content += ` ${icon("thinking")} ${ctx.thinkingLevel}`;
+			rightExtension = `${icon("thinking")} ${ctx.thinkingLevel}`;
 		}
-		return { text: content, visible: true };
+		return { text: content, visible: true, rightExtension };
 	},
 
 	shell_mode(ctx): RenderedSegment {

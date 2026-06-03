@@ -2,6 +2,7 @@ import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory } from "./types.ts";
 import {
 	makePill,
+	makeExtension,
 	packPills,
 	SEPARATORS,
 } from "../status-bar/pill-renderer.ts";
@@ -18,28 +19,28 @@ import {
 const PILL_FG = "0";
 
 const SEGMENT_COLORS: Record<string, (t: string) => string> = {
-	model: (t) => `\x1b[48;5;39m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	thinking: (t) => `\x1b[48;5;99m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	shell_mode: (t) => `\x1b[48;5;33m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	path: (t) => `\x1b[48;5;71m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	git: (t) => `\x1b[48;5;178m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	context_pct: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	context_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	cost: (t) => `\x1b[48;5;130m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	token_in: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	token_out: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	token_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	cache_read: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	cache_write: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	time: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	time_spent: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	session: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	hostname: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
-	extension_statuses: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	model: (t) => `\x1b[48;5;39m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	thinking: (t) => `\x1b[48;5;99m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	shell_mode: (t) => `\x1b[48;5;33m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	path: (t) => `\x1b[48;5;71m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	git: (t) => `\x1b[48;5;178m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	context_pct: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	context_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	cost: (t) => `\x1b[48;5;130m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	token_in: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	token_out: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	token_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	cache_read: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	cache_write: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	time: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	time_spent: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	session: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	hostname: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
+	extension_statuses: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
 };
 
 function defaultColor(t: string): string {
-	return `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`;
+	return `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`;
 }
 
 export const statusBarWidgetFactory: WidgetFactory = (
@@ -165,26 +166,26 @@ export const statusBarWidgetFactory: WidgetFactory = (
 		render(width: number, _height: number): string[] {
 			const ctx = buildContext();
 
+			const makePillFromSegment = (segId: SegmentId) => {
+				const segFn = SEGMENTS[segId];
+				if (!segFn) return null;
+				const result = segFn(ctx);
+				if (!result.visible) return null;
+				const colorFn = SEGMENT_COLORS[segId] ?? defaultColor;
+				const pill = makePill("", result.text, colorFn);
+				// Attach right extension if the segment provides one
+				if (result.rightExtension && pill.bg !== null) {
+					pill.rightExt = makeExtension(result.rightExtension, pill.bg);
+				}
+				return pill;
+			};
+
 			const leftPills = leftSegments
-				.map((segId) => {
-					const segFn = SEGMENTS[segId];
-					if (!segFn) return null;
-					const result = segFn(ctx);
-					if (!result.visible) return null;
-					const colorFn = SEGMENT_COLORS[segId] ?? defaultColor;
-					return makePill("", result.text, colorFn);
-				})
+				.map(makePillFromSegment)
 				.filter((p): p is NonNullable<typeof p> => p !== null);
 
 			const rightPills = rightSegments
-				.map((segId) => {
-					const segFn = SEGMENTS[segId];
-					if (!segFn) return null;
-					const result = segFn(ctx);
-					if (!result.visible) return null;
-					const colorFn = SEGMENT_COLORS[segId] ?? defaultColor;
-					return makePill("", result.text, colorFn);
-				})
+				.map(makePillFromSegment)
 				.filter((p): p is NonNullable<typeof p> => p !== null);
 
 			const line = packPills(leftPills, rightPills, separator, width);
