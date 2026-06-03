@@ -9,6 +9,10 @@ export interface WidgetDeps {
 		fg: (color: string, text: string) => string;
 	};
 	keybindings: unknown;
+	/** Function to submit editor text (wired to pi's message submission) */
+	submitFn: (text: string) => void;
+	/** Autocomplete provider chain, captured from pi at startup */
+	autocompleteProvider?: unknown;
 	/** Completion engine, injected by the grid component after creation */
 	completionEngine?: CompletionEngine;
 }
@@ -40,6 +44,18 @@ export interface WidgetInstance {
 
 	/** Whether this widget wants key release events (Kitty protocol). */
 	wantsKeyRelease?: boolean;
+
+	/**
+	 * Get the current text content (for editor widgets).
+	 * Returns the full text as a single string.
+	 */
+	getText?(): string;
+
+	/**
+	 * Set the text content (for editor widgets).
+	 * Replaces the current buffer and resets cursor to end.
+	 */
+	setText?(text: string): void;
 }
 
 /** Factory function that creates a widget instance */
