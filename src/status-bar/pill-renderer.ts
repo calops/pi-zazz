@@ -64,21 +64,9 @@ export function darkenColor(baseColor: number): number {
 }
 
 /**
- * Render an extension sub-pill.
- * Uses the pill's main color as foreground and a darkened version as background,
- * wrapped in / separators colored with the extension's background.
- */
-function renderExtension(ext: PillExtension): string {
-	return (
-		`\x1b[38;5;${ext.darkBg}m\x1b[49m\u{E0B6}\x1b[0m` +
-		`\x1b[48;5;${ext.darkBg}m\x1b[38;5;${ext.mainFg}m${ext.text}\x1b[0m` +
-		`\x1b[38;5;${ext.darkBg}m\x1b[49m\u{E0B4}\x1b[0m`
-	);
-}
-
-/**
  * Render a single pill with rounded separators and a trailing space.
- * If the pill has left/right extensions, they are rendered alongside.
+ * Render a single pill with rounded separators and a trailing space.
+ * If the pill has a right extension, it blends under the closing .
  */
 function renderPill(
 	p: Pill,
@@ -86,17 +74,20 @@ function renderPill(
 	fallbackSep: string,
 ): string {
 	if (p.bg !== null && p.fg !== null) {
-		const left = p.leftExt ? renderExtension(p.leftExt) : "";
-		const right = p.rightExt ? renderExtension(p.rightExt) : "";
+		const hasRightExt = !!p.rightExt;
 		return (
-			left +
 			// Opening rounded left edge (fg=pill_bg, bg=terminal default)
 			`\x1b[38;5;${p.bg}m\x1b[49m\u{E0B6}\x1b[0m` +
 			// Pill content (already styled from makePill)
 			p.text +
-			// Closing rounded right edge (fg=pill_bg, bg=terminal default)
-			`\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m` +
-			right +
+			// Closing  transitions to extension bg when present, otherwise terminal default
+			(hasRightExt && p.rightExt
+				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;5;${p.rightExt.darkBg}m\u{E0B4}\x1b[0m` +
+				  // Extension content (blended under the )
+				  `\x1b[48;5;${p.rightExt.darkBg}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
+				  // Extension closing 
+				  `\x1b[38;5;${p.rightExt.darkBg}m\x1b[49m\u{E0B4}\x1b[0m`
+				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
 			// Single space between pills
 			(trailingSpace ? " " : "")
 		);
@@ -124,7 +115,8 @@ export function makeExtension(text: string, baseBg: number): PillExtension {
 function pillFullWidth(p: Pill): number {
 	const mainWidth = p.width + 2; //  + content + 
 	const leftExt = p.leftExt ? p.leftExt.width + 2 : 0; //  + text + 
-	const rightExt = p.rightExt ? p.rightExt.width + 2 : 0;
+	// Right extension blends under the main ; only adds content + closing 
+	const rightExt = p.rightExt ? p.rightExt.width + 1 : 0;
 	return mainWidth + leftExt + rightExt;
 }
 

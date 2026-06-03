@@ -18,7 +18,7 @@ export const DEFAULT_GRID: GridConfig = {
 							leftSegments: ["model"],
 							rightSegments: [],
 							segmentOptions: {
-								model: { showThinkingLevel: false },
+								model: { showThinkingLevel: true },
 							},
 						},
 					},
