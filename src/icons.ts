@@ -16,9 +16,9 @@ export const ICONS = {
 	// Git
 	branch: "\u{E725}", // nf-dev-git_branch 
 	git: "\u{F1D3}", // nf-fa-git 
-	staged: "\u{F457}", // nf-oct-diff_added 
-	unstaged: "\u{F459}", // nf-oct-diff_modified 
-	untracked: "\u{F128}", // nf-fa-question 
+	staged: "\u{F4D2}", // nf-oct-diff 
+	unstaged: "\u{F4D6}", // nf-oct-diff 
+	untracked: "\u{F4D0}", // nf-oct-diff 
 
 	// Thinking / cognition
 	thinking: "\u{F192}", // nf-fa-circle 
