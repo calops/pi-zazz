@@ -272,7 +272,7 @@ export const customEditorWidgetFactory: WidgetFactory = (
 
 	if (provider) editor.setup(cell, deps, provider);
 
-	editor.onSubmit = (text: string) => editorBridge.onSubmit?.(text);
+	editor.onSubmit = (text: string) => submitFn(text);
 
 	const instance: WidgetInstance = {
 		render(width: number, _height: number): string[] {

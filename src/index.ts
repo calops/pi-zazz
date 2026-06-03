@@ -153,12 +153,10 @@ export default function (pi: ExtensionAPI) {
 			// Replace the built-in editor with a stub that reserves space
 			// equal to the grid height. The overlay updates reservedEditorHeight
 			// each render so messages stop exactly above the grid.
-			ctx.ui.setEditorComponent?.(
-				(tui, theme, kb) => {
-					stubEditorRef = new StubEditor(tui, theme, kb);
-					return stubEditorRef;
-				},
-			);
+			ctx.ui.setEditorComponent?.((tui, theme, kb) => {
+				stubEditorRef = new StubEditor(tui, theme, kb);
+				return stubEditorRef;
+			});
 		} catch {
 			/* non-critical */
 		}
@@ -193,7 +191,10 @@ export default function (pi: ExtensionAPI) {
 					theme: theme as { fg: (c: string, t: string) => string },
 					keybindings: keybindings as unknown,
 					autocompleteProvider,
-					submitFn: (text: string) => pi.sendUserMessage(text),
+					// Route through StubEditor.onSubmit (which is pi's defaultEditor.onSubmit)
+					// so slash commands (/model, /settings, etc.) are processed before sending.
+					submitFn: (text: string) =>
+						stubEditorRef?.onSubmit?.(text) ?? pi.sendUserMessage(text),
 				};
 
 				const grid = new GridComponent(
