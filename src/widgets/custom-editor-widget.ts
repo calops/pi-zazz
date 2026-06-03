@@ -183,8 +183,8 @@ class OverlayEditor extends Editor {
 		let popupRow = cursorTerminalRow - popupH;
 		if (popupRow < 0) popupRow = cursorTerminalRow + 1;
 
-		// Column: cursor column + 2 for "> " prefix
-		const popupCol = this.cell.terminalCol + (cursor.col as number) + 2;
+		// Popup's internal `  ` prefix aligns its text with the cursor's visual column.
+		const popupCol = this.cell.terminalCol + (cursor.col as number);
 		const termWidth = this.deps.tui.termWidth ?? 80;
 		const clampedCol = Math.min(popupCol, Math.max(0, termWidth - popupW));
 
