@@ -88,6 +88,11 @@ export class GridComponent {
 				terminalRow += effectiveHeight;
 			}
 		}
+		// Store the grid's terminal offset so completion popups can position correctly
+		const tuiObj = this.deps.tui as unknown as TUI;
+		const gridTopRow = tuiObj.terminal.rows - allLines.length;
+		(this.deps as unknown as Record<string, unknown>).gridTopRow = gridTopRow;
+
 		return allLines;
 	}
 

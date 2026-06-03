@@ -1,5 +1,4 @@
 import type { GridCellInfo } from "../grid/types.ts";
-import type { CompletionEngine } from "../completion/completion-engine.ts";
 
 /** Dependencies injected into every widget factory */
 export interface WidgetDeps {
@@ -13,8 +12,6 @@ export interface WidgetDeps {
 	submitFn: (text: string) => void;
 	/** Autocomplete provider chain, captured from pi at startup */
 	autocompleteProvider?: unknown;
-	/** Completion engine, injected by the grid component after creation */
-	completionEngine?: CompletionEngine;
 }
 
 /** Interface every widget must implement */

@@ -1,433 +1,267 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import {
+	Editor,
+	type EditorOptions,
+	type EditorTheme,
+	visibleWidth,
+	type Component,
+	type OverlayHandle,
+	type TUI,
+} from "@earendil-works/pi-tui";
+import type {
+	AutocompleteItem,
+	AutocompleteProvider,
+} from "@earendil-works/pi-tui";
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory, WidgetInstance } from "./types.ts";
+import type { GridCellInfo } from "../grid/types.ts";
 
-// ── Types ──────────────────────────────────────────────────────────
+// ── ANSI theme ──────────────────────────────────────────────────────
 
-interface CompletionItem {
-	value: string;
-	label: string;
-	description?: string;
+const BG_DARK = "\x1b[48;2;35;37;44m";
+const BG_SEL = "\x1b[48;2;55;58;68m";
+const BG_RESET = "\x1b[49m";
+const FG_RESET = "\x1b[0m";
+
+// ── Completion overlay component ────────────────────────────────────
+
+class CompletionOverlayComponent implements Component {
+	items: AutocompleteItem[] = [];
+	selectedIdx = 0;
+	width = 40;
+
+	render(_width: number): string[] {
+		if (this.items.length === 0) return [];
+
+		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		const bright = (s: string) => `\x1b[1m${s}\x1b[22m`;
+
+		const lines: string[] = [];
+		for (let i = 0; i < this.items.length; i++) {
+			const item = this.items[i]!;
+			const isSel = i === this.selectedIdx;
+			const bg = isSel ? BG_SEL : BG_DARK;
+			let row = `  ${isSel ? bright(item.label) : dim(item.label)}`;
+			if (item.description) row += dim(`  ${item.description}`);
+			const vw = visibleWidth(row);
+			const pad = this.width - vw;
+			if (pad > 0) row += " ".repeat(pad);
+			lines.push(`${bg}${row}${BG_RESET}${FG_RESET}`);
+		}
+		return lines;
+	}
+
+	handleInput?(_data: string): void {}
+	invalidate(): void {}
 }
 
-interface AutocompleteProvider {
-	getSuggestions(
-		lines: string[],
-		cursorLine: number,
-		cursorCol: number,
-		options: { signal?: AbortSignal },
-	): Promise<{ prefix: string; items: CompletionItem[] } | null>;
-	applyCompletion(
-		lines: string[],
-		cursorLine: number,
-		cursorCol: number,
-		item: CompletionItem,
-		prefix: string,
-	): { lines: string[]; cursorLine: number; cursorCol: number };
+// ── Stub SelectList — tracks selection state, renders nothing ───────
+
+function createStubSelectList(
+	items: AutocompleteItem[],
+	onSelectionChanged: (idx: number) => void,
+) {
+	let selectedIndex = 0;
+
+	return {
+		items,
+		selectedIndex,
+		render: () => [] as string[],
+		handleInput: () => {},
+		invalidate: () => {},
+		getSelectedItem: () => items[selectedIndex] ?? null,
+		getSelectedIndex: () => selectedIndex,
+		setSelectedIndex: (i: number) => {
+			if (i !== selectedIndex && i >= 0 && i < items.length) {
+				selectedIndex = i;
+				onSelectionChanged(i);
+			}
+		},
+		setFilter: () => {},
+	};
 }
 
-interface EditorState {
-	lines: string[];
-	cursorLine: number;
-	cursorCol: number;
-	scrollOffset: number;
-	/** Active completion state */
-	completions: CompletionItem[] | null;
-	completionIdx: number;
-	completionPrefix: string;
+// ── OverlayEditor — built-in Editor + our custom completion overlay ─
+
+class OverlayEditor extends Editor {
+	private completionHandle: OverlayHandle | null = null;
+	private completionComponent: CompletionOverlayComponent | null = null;
+	private cell: GridCellInfo | null = null;
+	private deps: WidgetDeps | null = null;
+
+	constructor(tui: TUI, theme: EditorTheme, options?: EditorOptions) {
+		super(tui, theme, options);
+
+		// Monkey-patch three private methods to intercept completion rendering.
+		// TypeScript `private` is compile-time only — at runtime these are
+		// regular prototype methods we can override via bracket assignment.
+		const self = this as unknown as Record<string, unknown>;
+		const origClear = self["clearAutocompleteUi"] as () => void;
+
+		// 1) createAutocompleteList — build stub SelectList + show our overlay
+		// Note: this replaces the prototype method, called from the parent class's
+		// applyAutocompleteSuggestions with (prefix, items) from the suggestion payload.
+		// We MUST use those parameters rather than reading autocompleteState (which
+		// hasn't been updated yet at that point) and MUST return the stub so the
+		// caller's `this.autocompleteList = this.createAutocompleteList(...)` works.
+		self["createAutocompleteList"] = (
+			_prefix: string,
+			items: AutocompleteItem[],
+		) => {
+			if (!items?.length) {
+				return createStubSelectList([], () => {});
+			}
+
+			const maxVisible = (self["autocompleteMaxVisible"] as number) ?? 6;
+			const visible = items.slice(0, maxVisible);
+
+			const stub = createStubSelectList(visible, (idx) => {
+				if (this.completionComponent) {
+					this.completionComponent.selectedIdx = idx;
+					this.tui.requestRender?.();
+				}
+			});
+
+			this.showCompletionOverlay(visible);
+			return stub;
+		};
+
+		// 2) clearAutocompleteUi — hide our overlay + call original for cleanup
+		self["clearAutocompleteUi"] = () => {
+			origClear.call(this);
+			this.hideCompletionOverlay();
+		};
+
+		// 3) isShowingAutocomplete — delegate to our overlay state
+		self["isShowingAutocomplete"] = () => this.completionHandle !== null;
+	}
+
+	setup(
+		cell: GridCellInfo,
+		deps: WidgetDeps,
+		provider: AutocompleteProvider,
+	): void {
+		this.cell = cell;
+		this.deps = deps;
+		this.setAutocompleteProvider(provider);
+	}
+
+	// ── Overlay management ──────────────────────────────────────────
+
+	private showCompletionOverlay(items: AutocompleteItem[]): void {
+		this.hideCompletionOverlay();
+		if (items.length === 0 || !this.cell || !this.deps) return;
+
+		const popupH = items.length;
+
+		let maxLabel = 10;
+		for (const item of items) {
+			let w = item.label.length + 2;
+			if (item.description) w += item.description.length + 4;
+			if (w > maxLabel) maxLabel = w;
+		}
+		const popupW = Math.min(Math.max(maxLabel, 20), 60);
+
+		const gridTop =
+			((this.deps as unknown as Record<string, unknown>).gridTopRow as
+				| number
+				| undefined) ?? 0;
+		const cursor = this.getCursor();
+		const scrollOffset =
+			(this as unknown as Record<string, unknown>)["scrollOffset"] ?? 0;
+		const cursorVisibleRow = (cursor.line as number) - (scrollOffset as number);
+		const cursorTerminalRow =
+			gridTop + this.cell.terminalRow + cursorVisibleRow;
+
+		let popupRow = cursorTerminalRow - popupH;
+		if (popupRow < 0) popupRow = cursorTerminalRow + 1;
+
+		// Column: cursor column + 2 for "> " prefix
+		const popupCol = this.cell.terminalCol + (cursor.col as number) + 2;
+		const termWidth = this.deps.tui.termWidth ?? 80;
+		const clampedCol = Math.min(popupCol, Math.max(0, termWidth - popupW));
+
+		this.completionComponent = new CompletionOverlayComponent();
+		this.completionComponent.items = items;
+		this.completionComponent.selectedIdx = 0;
+		this.completionComponent.width = popupW;
+
+		// tui is the protected field from Editor
+		const tuiObj = (this as unknown as Record<string, unknown>)["tui"] as TUI;
+		this.completionHandle = tuiObj.showOverlay(this.completionComponent, {
+			nonCapturing: true,
+			row: popupRow,
+			col: clampedCol,
+			width: popupW,
+		});
+	}
+
+	private hideCompletionOverlay(): void {
+		if (this.completionHandle) {
+			this.completionHandle.hide();
+			this.completionHandle = null;
+			this.completionComponent = null;
+		}
+	}
 }
 
-// ── Key helpers ────────────────────────────────────────────────────
-
-function isPrintable(data: string): boolean {
-	const code = data.codePointAt(0);
-	return code !== undefined && (code >= 0x20 || code === 0x0d || code === 0x0a);
-}
-
-function isAutocompleteTrigger(data: string, col: number): boolean {
-	if (data === "\t") return true;
-	if (data === "/" && col === 0) return true;
-	if (data === "@") return true;
-	return false;
-}
-
-// ── Editor Widget ───────────────────────────────────────────────────
+// ── Widget factory ──────────────────────────────────────────────────
 
 export const customEditorWidgetFactory: WidgetFactory = (
 	deps: WidgetDeps,
 	_config: unknown,
+	cell: GridCellInfo,
 ) => {
-	const state: EditorState = {
-		lines: [""],
-		cursorLine: 0,
-		cursorCol: 0,
-		scrollOffset: 0,
-		completions: null,
-		completionIdx: 0,
-		completionPrefix: "",
-	};
-
-	const autocompleteProvider: AutocompleteProvider | null =
-		(deps.autocompleteProvider as AutocompleteProvider | undefined) ?? null;
+	const tui = deps.tui as unknown as TUI;
+	const provider = deps.autocompleteProvider as
+		| AutocompleteProvider
+		| undefined;
 	const submitFn = deps.submitFn;
 
-	// ── Buffer helpers ────────────────────────────────────────────────
+	const editorTheme: EditorTheme = {
+		borderColor: (str: string) => deps.theme.fg("border", str),
+		selectList: {
+			selectedPrefix: (str: string) => deps.theme.fg("accent", str),
+			selectedText: (str: string) => deps.theme.fg("accent", str),
+			description: (str: string) => deps.theme.fg("muted", str),
+			scrollInfo: (str: string) => deps.theme.fg("dim", str),
+			noMatch: (str: string) => deps.theme.fg("dim", str),
+		},
+	};
 
-	function clampCursor(): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		if (state.cursorCol > line.length) state.cursorCol = line.length;
-		if (state.cursorCol < 0) state.cursorCol = 0;
-	}
+	const editor = new OverlayEditor(tui, editorTheme, {
+		autocompleteMaxVisible: 6,
+	});
 
-	function insertChar(ch: string): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		state.lines[state.cursorLine] =
-			line.slice(0, state.cursorCol) + ch + line.slice(state.cursorCol);
-		state.cursorCol += ch.length;
-	}
+	if (provider) editor.setup(cell, deps, provider);
 
-	function deleteBefore(): void {
-		if (state.cursorCol > 0) {
-			const line = state.lines[state.cursorLine] ?? "";
-			state.lines[state.cursorLine] =
-				line.slice(0, state.cursorCol - 1) + line.slice(state.cursorCol);
-			state.cursorCol--;
-		} else if (state.cursorLine > 0) {
-			const prev = state.lines[state.cursorLine - 1] ?? "";
-			const curr = state.lines[state.cursorLine] ?? "";
-			state.cursorCol = prev.length;
-			state.lines[state.cursorLine - 1] = prev + curr;
-			state.lines.splice(state.cursorLine, 1);
-			state.cursorLine--;
-		}
-	}
-
-	function deleteForward(): void {
-		const line = state.lines[state.cursorLine] ?? "";
-		if (state.cursorCol < line.length) {
-			state.lines[state.cursorLine] =
-				line.slice(0, state.cursorCol) + line.slice(state.cursorCol + 1);
-		} else if (state.cursorLine < state.lines.length - 1) {
-			const next = state.lines[state.cursorLine + 1] ?? "";
-			state.lines[state.cursorLine] = line + next;
-			state.lines.splice(state.cursorLine + 1, 1);
-		}
-	}
-
-	function deleteWordBefore(): void {
-		if (state.cursorCol === 0) {
-			deleteBefore();
-			return;
-		}
-		const line = state.lines[state.cursorLine] ?? "";
-		let pos = state.cursorCol;
-		while (pos > 0 && line[pos - 1] === " ") pos--;
-		while (pos > 0 && line[pos - 1] !== " ") pos--;
-		state.lines[state.cursorLine] =
-			line.slice(0, pos) + line.slice(state.cursorCol);
-		state.cursorCol = pos;
-	}
-
-	function getFullText(): string {
-		return state.lines.join("\n");
-	}
-
-	function submitText(): void {
-		const text = getFullText();
-		state.lines = [""];
-		state.cursorLine = 0;
-		state.cursorCol = 0;
-		if (submitFn) submitFn(text);
-	}
-
-	// ── Completions ───────────────────────────────────────────────────
-
-	function dismissCompletions(): void {
-		state.completions = null;
-		state.completionIdx = 0;
-		state.completionPrefix = "";
-	}
-
-	async function triggerAutocomplete(): Promise<void> {
-		if (!autocompleteProvider) return;
-		const abort = new AbortController();
-		const result = await autocompleteProvider.getSuggestions(
-			state.lines,
-			state.cursorLine,
-			state.cursorCol,
-			{ signal: abort.signal },
-		);
-		if (result && result.items.length > 0) {
-			state.completions = result.items;
-			state.completionIdx = 0;
-			state.completionPrefix = result.prefix;
-		} else {
-			dismissCompletions();
-		}
-	}
-
-	function applySelectedCompletion(): void {
-		if (!state.completions || !autocompleteProvider) return;
-		const item = state.completions[state.completionIdx];
-		if (!item) return;
-		const newState = autocompleteProvider.applyCompletion(
-			state.lines,
-			state.cursorLine,
-			state.cursorCol,
-			item,
-			state.completionPrefix,
-		);
-		state.lines = newState.lines;
-		state.cursorLine = newState.cursorLine;
-		state.cursorCol = newState.cursorCol;
-		dismissCompletions();
-		clampCursor();
-	}
-
-	// ── Rendering ─────────────────────────────────────────────────────
-
-	function renderCompletionPopup(width: number): string[] {
-		if (!state.completions || state.completions.length === 0) return [];
-
-		const dim = (s: string) => deps.theme.fg("dim", s);
-		const accent = (s: string) => deps.theme.fg("accent", s);
-		const muted = (s: string) => deps.theme.fg("muted", s);
-		const maxH = Math.min(state.completions.length, 6);
-		const items = state.completions.slice(0, maxH);
-		const w = Math.max(30, Math.min(width - 4, 70));
-
-		const lines: string[] = [];
-		const hz = (c: string) => dim(c.repeat(w));
-		lines.push(dim("╭") + hz("─") + dim("╮"));
-
-		for (let i = 0; i < items.length; i++) {
-			const item = items[i]!;
-			const sel = i === state.completionIdx ? accent("▶") : " ";
-			let row = ` ${sel} ${item.label}`;
-			if (item.description) row += muted(`  ${item.description}`);
-			lines.push(dim("│") + padLine(row, w) + dim("│"));
-		}
-
-		lines.push(dim("╰") + hz("─") + dim("╯"));
-		return lines;
-	}
-
-	function renderEditorText(width: number, height: number): string[] {
-		clampCursor();
-		const lines: string[] = [];
-
-		const popupLines = renderCompletionPopup(width);
-		const popupH = popupLines.length;
-		const editH = height - popupH;
-
-		// Popup goes above the editor area
-		for (const pl of popupLines) lines.push(pl);
-
-		// Scroll to keep cursor in the remaining editor area
-		if (state.cursorLine < state.scrollOffset)
-			state.scrollOffset = state.cursorLine;
-		if (state.cursorLine >= state.scrollOffset + editH) {
-			state.scrollOffset = state.cursorLine - editH + 1;
-		}
-		if (state.scrollOffset < 0) state.scrollOffset = 0;
-
-		const visible = state.lines.slice(
-			state.scrollOffset,
-			state.scrollOffset + editH,
-		);
-
-		for (let i = 0; i < visible.length; i++) {
-			const li = state.scrollOffset + i;
-			const text = visible[i] ?? "";
-			if (li === state.cursorLine) {
-				const before = text.slice(0, state.cursorCol);
-				const at = text[state.cursorCol] ?? " ";
-				const after = text.slice(state.cursorCol + 1);
-				const cursor = deps.theme.fg("accent", `\x1b[7m${at}\x1b[27m`);
-				lines.push(padLine(`> ${before}${cursor}${after}`, width));
-			} else {
-				lines.push(padLine(`  ${text}`, width));
-			}
-		}
-
-		for (let i = lines.length; i < height; i++) {
-			lines.push(
-				deps.theme.fg("dim", "~") + " ".repeat(Math.max(0, width - 1)),
-			);
-		}
-
-		return lines;
-	}
-
-	// ── Widget instance ──────────────────────────────────────────────
+	editor.onSubmit = (text: string) => submitFn(text);
 
 	const instance: WidgetInstance = {
-		render(width: number, height: number): string[] {
-			return renderEditorText(width, height);
+		render(width: number, _height: number): string[] {
+			return editor.render(width);
 		},
 
 		handleInput(data: string): boolean {
-			// ── Arrow keys with completions active ──
-			if (state.completions) {
-				if (data === "\x1b[A" || data === "\x1bOA") {
-					state.completionIdx = Math.max(0, state.completionIdx - 1);
-					return true;
-				}
-				if (data === "\x1b[B" || data === "\x1bOB") {
-					state.completionIdx = Math.min(
-						state.completions.length - 1,
-						state.completionIdx + 1,
-					);
-					return true;
-				}
-				if (data === "\r" || data === "\n" || data === "\t") {
-					applySelectedCompletion();
-					return true;
-				}
-				if (data === "\x1b") {
-					dismissCompletions();
-					return true;
-				}
-			}
-
-			// ── Enter: submit ──
-			if (data === "\r" || data === "\n") {
-				if (state.lines.length > 1) {
-					// Multi-line: insert newline
-					const line = state.lines[state.cursorLine] ?? "";
-					const before = line.slice(0, state.cursorCol);
-					const after = line.slice(state.cursorCol);
-					state.lines[state.cursorLine] = before;
-					state.lines.splice(state.cursorLine + 1, 0, after);
-					state.cursorLine++;
-					state.cursorCol = 0;
-					return true;
-				}
-				submitText();
-				return false; // let GridComponent → super handle submit
-			}
-
-			// ── Autocomplete triggers ──
-			if (isAutocompleteTrigger(data, state.cursorCol)) {
-				insertChar(data);
-				dismissCompletions();
-				void triggerAutocomplete();
-				return true;
-			}
-
-			// ── Escape ──
-			if (data === "\x1b") {
-				state.lines = [""];
-				state.cursorLine = 0;
-				state.cursorCol = 0;
-				dismissCompletions();
-				return true;
-			}
-
-			// ── Deletion ──
-			if (data === "\x7f" || data === "\x08") {
-				deleteBefore();
-				return true;
-			}
-			if (data === "\x1b[3~") {
-				deleteForward();
-				return true;
-			}
-			if (data === "\x17" || data === "\x1b\x7f") {
-				deleteWordBefore();
-				return true;
-			}
-
-			// ── Navigation (no completions active) ──
-			if (data === "\x1b[D") {
-				if (state.cursorCol > 0) state.cursorCol--;
-				else if (state.cursorLine > 0) {
-					state.cursorLine--;
-					state.cursorCol = (state.lines[state.cursorLine] ?? "").length;
-				}
-				return true;
-			}
-			if (data === "\x1b[C") {
-				const ln = state.lines[state.cursorLine] ?? "";
-				if (state.cursorCol < ln.length) state.cursorCol++;
-				else if (state.cursorLine < state.lines.length - 1) {
-					state.cursorLine++;
-					state.cursorCol = 0;
-				}
-				return true;
-			}
-			if (data === "\x1b[A") {
-				if (state.cursorLine > 0) state.cursorLine--;
-				return true;
-			}
-			if (data === "\x1b[B") {
-				if (state.cursorLine < state.lines.length - 1) state.cursorLine++;
-				return true;
-			}
-
-			if (data === "\x01") {
-				state.cursorCol = 0;
-				return true;
-			}
-			if (data === "\x05") {
-				const le = state.lines[state.cursorLine] ?? "";
-				state.cursorCol = le.length;
-				return true;
-			}
-
-			// ── Kill line ──
-			if (data === "\x0b") {
-				state.lines[state.cursorLine] = (
-					state.lines[state.cursorLine] ?? ""
-				).slice(0, state.cursorCol);
-				return true;
-			}
-			if (data === "\x15") {
-				state.lines[state.cursorLine] = (
-					state.lines[state.cursorLine] ?? ""
-				).slice(state.cursorCol);
-				state.cursorCol = 0;
-				return true;
-			}
-
-			// ── Printable ──
-			if (isPrintable(data) && data !== "\r" && data !== "\n") {
-				insertChar(data);
-				// Re-trigger completions if they were active (live filtering via provider)
-				if (state.completions) {
-					dismissCompletions();
-					void triggerAutocomplete();
-				}
-				return true;
-			}
-
-			return false;
+			editor.handleInput(data);
+			return true;
 		},
 
 		getText(): string {
-			return getFullText();
+			return editor.getText();
 		},
 
 		setText(text: string): void {
-			state.lines = text === "" ? [""] : text.split("\n");
-			state.cursorLine = state.lines.length - 1;
-			const lastLine = state.lines[state.cursorLine]!;
-			state.cursorCol = lastLine.length;
-			state.scrollOffset = 0;
-			dismissCompletions();
+			editor.setText(text);
 		},
 
-		invalidate(): void {},
+		invalidate(): void {
+			editor.invalidate();
+		},
+
 		configure(_cfg: Record<string, unknown>): void {},
 	};
 
 	return instance;
 };
-
-function padLine(line: string, width: number): string {
-	const vw = visibleWidth(line);
-	if (vw >= width) return line.slice(0, width);
-	return line + " ".repeat(width - vw);
-}
 
 registerWidget("editor", customEditorWidgetFactory);
