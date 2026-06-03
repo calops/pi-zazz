@@ -56,7 +56,11 @@ export const statusBarWidgetFactory: WidgetFactory = (
 	const segmentOptions: SegmentOptions = opts.segmentOptions ?? {};
 
 	// Cached state populated by event callbacks
-	let cachedModel: SegmentContext["model"];
+	let cachedModel: SegmentContext["model"] = (
+		deps.ctx as
+			| { model?: { id: string; name?: string } }
+			| undefined
+	)?.model;
 	let cachedThinkingLevel = "off";
 	let cachedCwd = process.cwd();
 	let cachedSessionId: string | undefined;

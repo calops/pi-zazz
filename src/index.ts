@@ -191,6 +191,7 @@ export default function (pi: ExtensionAPI) {
 					theme: theme as { fg: (c: string, t: string) => string },
 					keybindings: keybindings as unknown,
 					autocompleteProvider,
+					ctx: ctx as unknown,
 					// Route through StubEditor.onSubmit (which is pi's defaultEditor.onSubmit)
 					// so slash commands (/model, /settings, etc.) are processed before sending.
 					submitFn: (text: string) =>
