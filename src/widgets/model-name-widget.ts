@@ -15,9 +15,7 @@ export const modelNameWidgetFactory: WidgetFactory = (
 	};
 
 	pi.on("model_select", (event: unknown) => {
-		const m = (
-			event as { model?: { id: string; name?: string } }
-		).model;
+		const m = (event as { model?: { id: string; name?: string } }).model;
 		cachedModel = m?.name ?? m?.id ?? "no-model";
 		if (cachedModel.startsWith("Claude ")) cachedModel = cachedModel.slice(7);
 	});

@@ -5,24 +5,55 @@ export const DEFAULT_GRID: GridConfig = {
 	minHeight: 8,
 	rows: [
 		{
-			id: "model-bar",
+			id: "status-bar",
 			height: { min: 1, max: 1 },
 			columns: [
 				{
-					id: "model",
+					id: "status",
 					width: {},
-					widget: { type: "model-name", config: {} },
+					widget: {
+						type: "status-bar",
+						config: {
+							separator: "powerline-thin",
+							leftSegments: ["model"],
+							rightSegments: [],
+							segmentOptions: {
+								model: { showThinkingLevel: false },
+							},
+						},
+					},
 				},
 			],
 		},
 		{
-			id: "editor-row",
+			id: "main",
 			height: { min: 1, max: 12 },
+			responsive: { breakpoint: 80, narrowLayout: "stacked" },
 			columns: [
 				{
 					id: "editor",
-					width: {},
+					width: { fraction: 2, min: 20 },
 					widget: { type: "editor", config: {} },
+				},
+				{
+					id: "lens",
+					width: { fraction: 1, min: 20 },
+					scrollable: true,
+					widget: { type: "pi-lens", config: { maxDiagnostics: 20 } },
+				},
+			],
+		},
+		{
+			id: "prompt-bar",
+			height: { min: 1, max: 1 },
+			columns: [
+				{
+					id: "prompt",
+					width: {},
+					widget: {
+						type: "prompt-bar",
+						config: { maxLength: 120 },
+					},
 				},
 			],
 		},
