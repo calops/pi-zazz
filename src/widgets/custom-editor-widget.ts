@@ -4,6 +4,7 @@ import {
 	type EditorTheme,
 	visibleWidth,
 	truncateToWidth,
+	getKeybindings,
 	type Component,
 	type OverlayHandle,
 	type TUI,
@@ -78,7 +79,18 @@ function createStubSelectList(
 		items,
 		selectedIndex,
 		render: () => [] as string[],
-		handleInput: () => {},
+		handleInput: (data: string) => {
+			const kb = getKeybindings();
+			if (kb.matches(data, "tui.select.up")) {
+				selectedIndex =
+					selectedIndex === 0 ? items.length - 1 : selectedIndex - 1;
+				onSelectionChanged(selectedIndex);
+			} else if (kb.matches(data, "tui.select.down")) {
+				selectedIndex =
+					selectedIndex === items.length - 1 ? 0 : selectedIndex + 1;
+				onSelectionChanged(selectedIndex);
+			}
+		},
 		invalidate: () => {},
 		getSelectedItem: () => items[selectedIndex] ?? null,
 		getSelectedIndex: () => selectedIndex,
