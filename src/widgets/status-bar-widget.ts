@@ -116,10 +116,16 @@ export const statusBarWidgetFactory: WidgetFactory = (
 				untracked = 0;
 			for (const line of status.split("\n")) {
 				if (!line.trim()) continue;
+				// git status --porcelain: XY filename
+				// X = index (staging area), Y = work tree
+				// "??" = untracked — skip staged/unstaged counting for these
+				if (line.startsWith("??")) {
+					untracked++;
+					continue;
+				}
 				const code = line.slice(0, 2);
 				if (code[0] !== " ") staged++;
 				if (code[1] !== " ") unstaged++;
-				if (line.startsWith("?")) untracked++;
 			}
 			cachedGit.branch = branch || null;
 			cachedGit.staged = staged;
