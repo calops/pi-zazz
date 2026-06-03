@@ -74,5 +74,5 @@ export function packPills(
 export function makePill(iconStr: string, text: string, color: ColorFn): Pill {
 	const content = iconStr ? `${iconStr} ${text}` : text;
 	const styled = color(content);
-	return { text: styled, width: visibleWidth(content) };
+	return { text: styled, width: visibleWidth(styled) };
 }
