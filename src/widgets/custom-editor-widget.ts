@@ -3,6 +3,7 @@ import {
 	type EditorOptions,
 	type EditorTheme,
 	visibleWidth,
+	truncateToWidth,
 	type Component,
 	type OverlayHandle,
 	type TUI,
@@ -45,9 +46,14 @@ class CompletionOverlayComponent implements Component {
 			let content = `${prefix}${isSel ? bright(item.label) : item.label}`;
 			if (item.description) content += dim(`  ${item.description}`);
 
-			const vw = visibleWidth(content);
-			const pad = Math.max(0, innerWidth - vw);
-			lines.push(dim("│ ") + content + " ".repeat(pad) + dim(" │"));
+			// Truncate content that spills past the right border
+			const truncated =
+				visibleWidth(content) > innerWidth
+					? truncateToWidth(content, innerWidth)
+					: content;
+			const tw = visibleWidth(truncated);
+			const pad = Math.max(0, innerWidth - tw);
+			lines.push(dim("│ ") + truncated + " ".repeat(pad) + dim(" │"));
 		}
 
 		// Bottom rounded border
@@ -175,9 +181,7 @@ class OverlayEditor extends Editor {
 			if (w > maxContent) maxContent = w;
 		}
 		// Add 4 for border overhead ("│ " left + " │" right)
-		// Soften the right edge by widening the popup by 1 column so content
-		// never visually collides with the right border.
-		const popupW = Math.min(Math.max(maxContent + 5, 25), 64);
+		const popupW = Math.min(Math.max(maxContent + 4, 24), 64);
 
 		const gridTop =
 			((this.deps as unknown as Record<string, unknown>).gridTopRow as
