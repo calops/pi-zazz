@@ -8,9 +8,7 @@ import type { GridConfig } from "./grid/types.ts";
 
 // Side-effect imports: register built-in widgets
 import "./widgets/custom-editor-widget.ts";
-import "./widgets/status-bar-widget.ts";
-import "./widgets/lens-widget.ts";
-import "./widgets/prompt-bar-widget.ts";
+import "./widgets/model-name-widget.ts";
 
 /**
  * Reserves vertical space equal to the grid height in pi's normal TUI layout.
