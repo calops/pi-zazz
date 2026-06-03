@@ -12,29 +12,34 @@ import {
 	type SegmentOptions,
 } from "../status-bar/segments.ts";
 
+// Each pill has its own distinguishing background color. The foreground uses
+// color 0 (typical terminal default background) so text appears to be punched
+// through the pill rather than painted on top.
+const PILL_FG = "0";
+
 const SEGMENT_COLORS: Record<string, (t: string) => string> = {
-	model: (t) => `\x1b[48;5;39m\x1b[38;5;16m ${t} \x1b[0m`,
-	thinking: (t) => `\x1b[48;5;99m\x1b[38;5;16m ${t} \x1b[0m`,
-	shell_mode: (t) => `\x1b[48;5;33m\x1b[38;5;16m ${t} \x1b[0m`,
-	path: (t) => `\x1b[48;5;71m\x1b[38;5;16m ${t} \x1b[0m`,
-	git: (t) => `\x1b[48;5;178m\x1b[38;5;16m ${t} \x1b[0m`,
-	context_pct: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	context_total: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	cost: (t) => `\x1b[48;5;130m\x1b[38;5;16m ${t} \x1b[0m`,
-	token_in: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	token_out: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	token_total: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	cache_read: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	cache_write: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	time: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	time_spent: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	session: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	hostname: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
-	extension_statuses: (t) => `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`,
+	model: (t) => `\x1b[48;5;39m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	thinking: (t) => `\x1b[48;5;99m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	shell_mode: (t) => `\x1b[48;5;33m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	path: (t) => `\x1b[48;5;71m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	git: (t) => `\x1b[48;5;178m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	context_pct: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	context_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	cost: (t) => `\x1b[48;5;130m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	token_in: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	token_out: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	token_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	cache_read: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	cache_write: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	time: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	time_spent: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	session: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	hostname: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
+	extension_statuses: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`,
 };
 
 function defaultColor(t: string): string {
-	return `\x1b[48;5;238m\x1b[38;5;252m ${t} \x1b[0m`;
+	return `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m ${t} \x1b[0m`;
 }
 
 export const statusBarWidgetFactory: WidgetFactory = (
@@ -57,9 +62,7 @@ export const statusBarWidgetFactory: WidgetFactory = (
 
 	// Cached state populated by event callbacks
 	let cachedModel: SegmentContext["model"] = (
-		deps.ctx as
-			| { model?: { id: string; name?: string } }
-			| undefined
+		deps.ctx as { model?: { id: string; name?: string } } | undefined
 	)?.model;
 	let cachedThinkingLevel = "off";
 	let cachedCwd = process.cwd();
