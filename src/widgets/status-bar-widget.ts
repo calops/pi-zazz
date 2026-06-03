@@ -65,7 +65,9 @@ export const statusBarWidgetFactory: WidgetFactory = (
 	let cachedModel: SegmentContext["model"] = (
 		deps.ctx as { model?: { id: string; name?: string } } | undefined
 	)?.model;
-	let cachedThinkingLevel = "off";
+	let cachedThinkingLevel =
+		((deps.pi as { getThinkingLevel?: () => string } | undefined)
+			?.getThinkingLevel?.()) ?? "off";
 	let cachedCwd = process.cwd();
 	let cachedSessionId: string | undefined;
 	let cachedContextPercent = 0;

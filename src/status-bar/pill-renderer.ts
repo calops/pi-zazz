@@ -48,19 +48,24 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-/** Darken a 256-color index by reducing its RGB components (works on the 6×6×6 cube). */
-export function darkenColor(baseColor: number): number {
+/**
+ * Blend a 256-color toward black by a factor (0 = pure black, 1 = unchanged).
+ * Works on the 6×6×6 cube (colors 16-231). For system/grayscale colors,
+ * decrement proportionally.
+ */
+export function darkenColor(baseColor: number, factor = 0.3): number {
 	if (baseColor >= 16 && baseColor <= 231) {
 		const n = baseColor - 16;
 		const r = Math.floor(n / 36);
 		const g = Math.floor((n % 36) / 6);
 		const b = n % 6;
-		return (
-			16 + Math.max(0, r - 1) * 36 + Math.max(0, g - 1) * 6 + Math.max(0, b - 1)
-		);
+		const br = Math.round(r * factor);
+		const bg = Math.round(g * factor);
+		const bb = Math.round(b * factor);
+		return 16 + Math.min(5, br) * 36 + Math.min(5, bg) * 6 + Math.min(5, bb);
 	}
-	// For system / grayscale colors, just decrement (clamped to 0)
-	return Math.max(0, baseColor - 8);
+	// For system / grayscale, map linearly toward 0
+	return Math.round(baseColor * factor);
 }
 
 /**
@@ -83,10 +88,10 @@ function renderPill(
 			// Closing  transitions to extension bg when present, otherwise terminal default
 			(hasRightExt && p.rightExt
 				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;5;${p.rightExt.darkBg}m\u{E0B4}\x1b[0m` +
-				  // Extension content (blended under the )
-				  `\x1b[48;5;${p.rightExt.darkBg}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
-				  // Extension closing 
-				  `\x1b[38;5;${p.rightExt.darkBg}m\x1b[49m\u{E0B4}\x1b[0m`
+					// Extension content (blended under the )
+					`\x1b[48;5;${p.rightExt.darkBg}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
+					// Extension closing 
+					`\x1b[38;5;${p.rightExt.darkBg}m\x1b[49m\u{E0B4}\x1b[0m`
 				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
 			// Single space between pills
 			(trailingSpace ? " " : "")
