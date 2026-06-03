@@ -28,8 +28,10 @@ class CompletionOverlayComponent implements Component {
 		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
 		const bright = (s: string) => `\x1b[1m${s}\x1b[22m`;
 
-		// Content width inside the border: │(space)…(space)│
-		const innerWidth = this.width - 4;
+		// Content area inside the border: │(space)…(space)│
+		// Use -5 so the longest content always gets at least 1 space of padding
+		// before the right border, preventing character-over-border artifacts.
+		const innerWidth = this.width - 5;
 
 		const lines: string[] = [];
 
@@ -167,15 +169,16 @@ class OverlayEditor extends Editor {
 
 		const popupH = items.length;
 
-		// Measure content width (prefix 2 + label + optional "  " + description)
+		// Measure visible content width (prefix 2 + label + optional "  " + description)
 		let maxContent = 10;
 		for (const item of items) {
-			let w = 2 + item.label.length;
-			if (item.description) w += 2 + item.description.length;
+			let w = 2 + visibleWidth(item.label);
+			if (item.description) w += 2 + visibleWidth(item.description);
 			if (w > maxContent) maxContent = w;
 		}
-		// Add 4 for border overhead ("│ " left + " │" right)
-		const popupW = Math.min(Math.max(maxContent + 4, 24), 64);
+		// Add 5 for border overhead ("│ " left + padding + " │" right, with a
+		// minimum 1-space cushion so content never collides with the right border)
+		const popupW = Math.min(Math.max(maxContent + 5, 25), 65);
 
 		const gridTop =
 			((this.deps as unknown as Record<string, unknown>).gridTopRow as
