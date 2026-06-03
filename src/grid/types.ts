@@ -96,7 +96,12 @@ export interface ColumnLayout {
 /** Height allocation for one row after layout solving */
 export interface RowLayout {
 	id: string;
+	/** Pre-allocated height (usually the row's min); actual rendered height may grow */
 	height: number;
+	/** Minimum rows from config; used by the grid component for clamping */
+	minHeight: number;
+	/** Maximum rows from config (Infinity if unbounded); used for clamping */
+	maxHeight: number;
 	/** Whether columns are stacked (narrow layout) instead of side-by-side */
 	stacked: boolean;
 	columns: ColumnLayout[];

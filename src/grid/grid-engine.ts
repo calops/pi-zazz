@@ -2,7 +2,6 @@ import type {
 	ColumnConfig,
 	ColumnLayout,
 	GridConfig,
-	HeightConstraint,
 	RowConfig,
 	RowLayout,
 	LayoutPlan,
@@ -35,7 +34,14 @@ export function computeLayout(
 		const rowConfig = visibleRows[i]!;
 		const height = rowHeights[i]!;
 		const { stacked, columns } = allocateWidths(rowConfig, termWidth);
-		rows.push({ id: rowConfig.id, height, stacked, columns });
+		rows.push({
+			id: rowConfig.id,
+			height,
+			minHeight: rowConfig.height.min,
+			maxHeight: rowConfig.height.max ?? Number.POSITIVE_INFINITY,
+			stacked,
+			columns,
+		});
 	}
 
 	return { rows, fallback: false };
@@ -45,62 +51,26 @@ function allocateHeights(
 	rowConfigs: readonly RowConfig[],
 	termHeight: number,
 ): number[] {
-	const heights = new Array<number>(rowConfigs.length).fill(0);
-
-	for (let i = 0; i < rowConfigs.length; i++) {
-		const h = rowConfigs[i]!.height;
-		heights[i] = h.min;
-	}
+	// Start each row at its minimum height — no grow distribution.
+	// Actual rendered content determines the row's final height in
+	// GridComponent.render() (clamped to each row's [min, max]).
+	const heights = rowConfigs.map((r) => r.height.min);
 
 	let used = heights.reduce((sum, h) => sum + h, 0);
-	let remaining = termHeight - used;
 
-	if (remaining > 0) {
-		const growRows = rowConfigs
-			.map((r, i) => ({ height: r.height, index: i }))
-			.filter((r) => r.height.grow === true && r.height.max !== r.height.min);
-
-		if (growRows.length > 0) {
-			const perRow = Math.floor(remaining / growRows.length);
-			for (const { height, index } of growRows) {
-				const capped = clampExtra(perRow, heights[index]!, height);
-				heights[index] = heights[index]! + capped;
-				remaining -= capped;
-			}
-			if (remaining > 0 && growRows.length > 0) {
-				const first = growRows[0]!;
-				const capped = clampExtra(
-					remaining,
-					heights[first.index]!,
-					first.height,
-				);
-				heights[first.index] = heights[first.index]! + capped;
-			}
-		}
-	}
-
+	// If total minimums exceed terminal height, shrink from the bottom
 	if (used > termHeight) {
 		for (let i = rowConfigs.length - 1; i >= 0; i--) {
-			const h = rowConfigs[i]!.height;
+			const min = rowConfigs[i]!.height.min;
 			const excess = used - termHeight;
 			if (excess <= 0) break;
-			const shrink = Math.min(heights[i]! - h.min, excess);
+			const shrink = Math.min(heights[i]! - min, excess);
 			heights[i] = heights[i]! - shrink;
 			used -= shrink;
 		}
 	}
 
 	return heights;
-}
-
-function clampExtra(
-	extra: number,
-	current: number,
-	constraint: HeightConstraint,
-): number {
-	const max = constraint.max ?? Number.POSITIVE_INFINITY;
-	const capped = Math.min(extra, max - current);
-	return Math.max(0, capped);
 }
 
 function allocateWidths(

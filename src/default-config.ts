@@ -41,7 +41,7 @@ export const DEFAULT_GRID: GridConfig = {
 		},
 		{
 			id: "main",
-			height: { min: 2, max: 12, grow: true },
+			height: { min: 1, max: 12 },
 			responsive: { breakpoint: 80, narrowLayout: "stacked" },
 			columns: [
 				{

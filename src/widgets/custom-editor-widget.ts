@@ -135,6 +135,14 @@ class OverlayEditor extends Editor {
 		self["isShowingAutocomplete"] = () => this.completionHandle !== null;
 	}
 
+	override render(width: number): string[] {
+		const lines = super.render(width);
+		if (lines.length <= 2) return [];
+		// Strip top and bottom horizontal bars (inherited from pi-tui's Editor);
+		// the completion popup is rendered as a separate overlay, not inline.
+		return lines.slice(1, -1);
+	}
+
 	setup(
 		cell: GridCellInfo,
 		deps: WidgetDeps,

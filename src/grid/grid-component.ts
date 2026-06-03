@@ -74,7 +74,13 @@ export class GridComponent {
 					cellLines.push(lines);
 					maxCellHeight = Math.max(maxCellHeight, lines.length);
 				}
-				const effectiveHeight = Math.max(maxCellHeight, row.height);
+				// Row height is driven by actual widget content, not a pre-allocated budget.
+				// Clamp the tallest cell to the row's [min, max] so the row grows and
+				// shrinks with its content rather than filling leftover terminal space.
+				const effectiveHeight = Math.max(
+					row.minHeight,
+					Math.min(maxCellHeight, row.maxHeight),
+				);
 				for (let lineIdx = 0; lineIdx < effectiveHeight; lineIdx++) {
 					let composed = "";
 					for (let ci = 0; ci < row.columns.length; ci++) {
