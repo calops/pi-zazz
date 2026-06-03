@@ -212,12 +212,11 @@ class OverlayEditor extends Editor {
 		if (popupRow < 0) popupRow = cursorTerminalRow + 1;
 
 		// Popup's internal `  ` prefix aligns its text with the cursor's visual column.
+		// Anchor at the cursor; don't clamp to the right — the terminal clips naturally
+		// and it's better to lose the right edge than to appear far from where the user
+		// is typing.
 		const popupCol = this.cell.terminalCol + (cursor.col as number);
-		const termWidth = this.deps.tui.termWidth ?? 80;
-		const clampedCol = Math.max(
-			0,
-			Math.min(popupCol, Math.max(0, termWidth - popupW)),
-		);
+		const clampedCol = Math.max(0, popupCol);
 
 		this.completionComponent = new CompletionOverlayComponent();
 		this.completionComponent.items = items;
