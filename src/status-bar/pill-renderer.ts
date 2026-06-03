@@ -48,24 +48,59 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-/**
- * Blend a 256-color toward black by a factor (0 = pure black, 1 = unchanged).
- * Works on the 6×6×6 cube (colors 16-231). For system/grayscale colors,
- * decrement proportionally.
- */
-export function darkenColor(baseColor: number, factor = 0.3): number {
-	if (baseColor >= 16 && baseColor <= 231) {
-		const n = baseColor - 16;
-		const r = Math.floor(n / 36);
-		const g = Math.floor((n % 36) / 6);
-		const b = n % 6;
-		const br = Math.round(r * factor);
-		const bg = Math.round(g * factor);
-		const bb = Math.round(b * factor);
-		return 16 + Math.min(5, br) * 36 + Math.min(5, bg) * 6 + Math.min(5, bb);
+// Catppuccin Mocha base: #1e1e2e
+const BG_RGB: [number, number, number] = [30, 30, 46];
+
+// 6×6×6 cube: component index → actual RGB value
+const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
+
+/** Convert a 6×6×6 cube color index (16-231) to actual RGB. */
+function cubeIndexToRgb(idx: number): [number, number, number] {
+	const n = idx - 16;
+	const ri = Math.floor(n / 36);
+	const gi = Math.floor((n % 36) / 6);
+	const bi = n % 6;
+	return [CUBE_LEVELS[ri]!, CUBE_LEVELS[gi]!, CUBE_LEVELS[bi]!];
+}
+
+/** Find the nearest 6×6×6 cube index for an RGB value. */
+function rgbToCubeIndex(r: number, g: number, b: number): number {
+	const dist = (a: number, b: number) => Math.abs(a - b);
+	let best = 0;
+	let bestDist = Infinity;
+	for (let ri = 0; ri < 6; ri++) {
+		for (let gi = 0; gi < 6; gi++) {
+			for (let bi = 0; bi < 6; bi++) {
+				const d =
+					dist(r, CUBE_LEVELS[ri]!) +
+					dist(g, CUBE_LEVELS[gi]!) +
+					dist(b, CUBE_LEVELS[bi]!);
+				if (d < bestDist) {
+					bestDist = d;
+					best = 16 + ri * 36 + gi * 6 + bi;
+				}
+			}
+		}
 	}
-	// For system / grayscale, map linearly toward 0
-	return Math.round(baseColor * factor);
+	return best;
+}
+
+/**
+ * Blend a 256-color index toward the window background (Catppuccin Mocha base).
+ * factor = 1 keeps the color unchanged, factor = 0 makes it the background color.
+ */
+export function darkenColor(baseColor: number, factor = 0.25): number {
+	if (baseColor >= 16 && baseColor <= 231) {
+		const [r, g, b] = cubeIndexToRgb(baseColor);
+		// Linear interpolation toward BG_RGB
+		const br = Math.round(r * factor + BG_RGB[0] * (1 - factor));
+		const bg = Math.round(g * factor + BG_RGB[1] * (1 - factor));
+		const bb = Math.round(b * factor + BG_RGB[2] * (1 - factor));
+		return rgbToCubeIndex(br, bg, bb);
+	}
+	// For system / grayscale colors: treat as gray, blend toward bg
+	const gray = Math.round(baseColor * factor + 30 * (1 - factor));
+	return Math.max(0, Math.min(255, gray));
 }
 
 /**
