@@ -20,21 +20,86 @@ import "./widgets/prompt-bar-widget.ts";
 let reservedEditorHeight = 0;
 
 /**
+ * Bridge between the StubEditor (pi's focused component) and the grid's editor
+ * widget. The overlay is non-capturing so input flows to the StubEditor, which
+ * forwards text operations to the widget and dispatches app keybindings.
+ */
+const editorBridge: {
+	handleInput: ((data: string) => boolean) | null;
+	getText: () => string;
+	setText: (text: string) => void;
+} = {
+	handleInput: null,
+	getText: () => "",
+	setText: () => {},
+};
+
+/**
  * StubEditor replaces the built-in editor, rendering nothing visually
  * but reserving exactly `reservedEditorHeight` blank lines.
  * This ensures pi's message area stops above the overlay's grid area.
+ *
+ * The overlay is non-capturing, so keyboard input flows to this editor.
+ * Text operations are forwarded to the grid's editor widget via editorBridge,
+ * and app-level keybindings (C-c, C-p, C-o, escape, etc.) are dispatched
+ * by this class (which extends CustomEditor and inherits its actionHandlers).
  */
 class StubEditor extends CustomEditor {
 	override render(_width: number): string[] {
 		return new Array(reservedEditorHeight).fill("");
 	}
 
-	override handleInput(_data: string): void {
-		// All input is captured by the overlay
+	override handleInput(data: string): void {
+		// Forward text input to the grid editor widget
+		editorBridge.handleInput?.(data);
+
+		// Dispatch app-level keybindings (same logic as CustomEditor.handleInput
+		// but without the fallthrough to Editor.handleInput for text processing,
+		// which is handled by the grid widget).
+		if (this.onExtensionShortcut?.(data)) return;
+		if (this.keybindings?.matches(data, "app.clipboard.pasteImage")) {
+			this.onPasteImage?.();
+			return;
+		}
+		if (this.keybindings?.matches(data, "app.interrupt")) {
+			if (!this.isShowingAutocomplete()) {
+				const handler =
+					this.onEscape ?? this.actionHandlers.get("app.interrupt");
+				handler?.();
+				return;
+			}
+			// Let Editor.handleInput cancel autocomplete
+			super.handleInput(data);
+			return;
+		}
+		if (this.keybindings?.matches(data, "app.exit")) {
+			if (editorBridge.getText().length === 0) {
+				const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
+				handler?.();
+				return;
+			}
+			return;
+		}
+		for (const [action, handler] of this.actionHandlers) {
+			if (
+				action !== "app.interrupt" &&
+				action !== "app.exit" &&
+				this.keybindings?.matches(data, action)
+			) {
+				handler();
+				return;
+			}
+		}
+		// Non-printable editor keys that don't match any editor binding
+		// fall through silently — the widget's handleInput already ran.
 	}
 
 	override getText(): string {
-		return "";
+		return editorBridge.getText();
+	}
+
+	override setText(text: string): void {
+		editorBridge.setText(text);
 	}
 }
 
@@ -141,6 +206,11 @@ export default function (pi: ExtensionAPI) {
 					}
 				};
 
+				// Wire the bridge so StubEditor can forward to the grid's widget
+				editorBridge.handleInput = (data) => grid.handleInput(data);
+				editorBridge.getText = () => grid.getText();
+				editorBridge.setText = (text) => grid.setText(text);
+
 				// Initial height estimate from the default layout so the
 				// stub editor reserves space even before the first render.
 				const estimatedLines = grid.render(80);
@@ -157,8 +227,10 @@ export default function (pi: ExtensionAPI) {
 						return gridLines;
 					},
 
-					handleInput: (data: string): void => {
-						grid.handleInput(data);
+					// Non-capturing overlay: keyboard input flows to the StubEditor
+					// (pi's focused component), which dispatches it via editorBridge.
+					handleInput: (_data: string): void => {
+						// Input is handled by the StubEditor; nothing to do here.
 					},
 
 					invalidate: (): void => {
@@ -169,6 +241,7 @@ export default function (pi: ExtensionAPI) {
 			{
 				overlay: true,
 				overlayOptions: {
+					nonCapturing: true,
 					anchor: "bottom-left",
 					width: "100%",
 					height: "100%",
