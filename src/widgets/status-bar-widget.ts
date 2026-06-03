@@ -97,7 +97,10 @@ export const statusBarWidgetFactory: WidgetFactory = (
 	function refreshGitStatus(): void {
 		try {
 			const { execSync } = require("node:child_process") as {
-				execSync: (cmd: string, opts: { cwd?: string; encoding: string }) => string;
+				execSync: (
+					cmd: string,
+					opts: { cwd?: string; encoding: string },
+				) => string;
 			};
 			const opts = { cwd: cachedCwd, encoding: "utf-8" };
 			const branch = execSync(

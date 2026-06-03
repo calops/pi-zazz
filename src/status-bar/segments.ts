@@ -151,11 +151,11 @@ export const SEGMENTS: Record<
 		}
 		const indicators: string[] = [];
 		if (opts.showStaged !== false && staged > 0)
-			indicators.push(`${icon("staged")}${staged}`);
+			indicators.push(`${icon("staged")} ${staged}`);
 		if (opts.showUnstaged !== false && unstaged > 0)
-			indicators.push(`${icon("unstaged")}${unstaged}`);
+			indicators.push(`${icon("unstaged")} ${unstaged}`);
 		if (opts.showUntracked !== false && untracked > 0)
-			indicators.push(`${icon("untracked")}${untracked}`);
+			indicators.push(`${icon("untracked")} ${untracked}`);
 		const rightExtension =
 			indicators.length > 0 ? indicators.join(" ") : undefined;
 		return { text, visible: true, rightExtension };
@@ -225,7 +225,11 @@ export const SEGMENTS: Record<
 				: `$${ctx.cost.toFixed(2)}`;
 			rightExtension = `${icon("cost")} ${display}`;
 		}
-		return { text: withIcon(icon("context"), text), visible: true, rightExtension };
+		return {
+			text: withIcon(icon("context"), text),
+			visible: true,
+			rightExtension,
+		};
 	},
 
 	context_total(ctx): RenderedSegment {
