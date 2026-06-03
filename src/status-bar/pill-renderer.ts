@@ -48,9 +48,6 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-// Catppuccin Mocha base: #1e1e2e
-const BG_RGB: [number, number, number] = [30, 30, 46];
-
 // 6×6×6 cube: component index → actual RGB value
 const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
 
@@ -63,18 +60,24 @@ function cubeIndexToRgb(idx: number): [number, number, number] {
 	return [CUBE_LEVELS[ri]!, CUBE_LEVELS[gi]!, CUBE_LEVELS[bi]!];
 }
 
-/** Find the nearest 6×6×6 cube index for an RGB value. */
+/** Find the nearest 6×6×6 cube index for an RGB value, biasing G down when blue dominates. */
 function rgbToCubeIndex(r: number, g: number, b: number): number {
-	const dist = (a: number, b: number) => Math.abs(a - b);
+	// The 6×6×6 cube jumps from G=0 (0) to G=1 (95) — dark blues with moderate
+	// green snap to teal. When blue is the primary channel, penalize G>0 hard.
+	const penalizeGreen = b > r && b > g;
 	let best = 0;
 	let bestDist = Infinity;
 	for (let ri = 0; ri < 6; ri++) {
 		for (let gi = 0; gi < 6; gi++) {
 			for (let bi = 0; bi < 6; bi++) {
-				const d =
-					dist(r, CUBE_LEVELS[ri]!) +
-					dist(g, CUBE_LEVELS[gi]!) +
-					dist(b, CUBE_LEVELS[bi]!);
+				const gv = CUBE_LEVELS[gi]!;
+				let d =
+					Math.abs(r - CUBE_LEVELS[ri]!) +
+					Math.abs(g - gv) +
+					Math.abs(b - CUBE_LEVELS[bi]!);
+				// When blue dominates, any green at level >= 95 is penalized heavily
+				// so dark blues don't snap to teal.
+				if (penalizeGreen && gv >= 95) d += 100;
 				if (d < bestDist) {
 					bestDist = d;
 					best = 16 + ri * 36 + gi * 6 + bi;
@@ -85,22 +88,52 @@ function rgbToCubeIndex(r: number, g: number, b: number): number {
 	return best;
 }
 
+/** Convert RGB to HSL. */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+	r /= 255; g /= 255; b /= 255;
+	const max = Math.max(r, g, b), min = Math.min(r, g, b);
+	const l = (max + min) / 2;
+	if (max === min) return [0, 0, l];
+	const d = max - min;
+	const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+	let h = 0;
+	switch (max) {
+		case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+		case g: h = ((b - r) / d + 2) / 6; break;
+		case b: h = ((r - g) / d + 4) / 6; break;
+	}
+	return [h * 360, s, l];
+}
+
+/** Convert HSL to RGB. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+	const c = (1 - Math.abs(2 * l - 1)) * s;
+	const hp = h / 60;
+	const x = c * (1 - Math.abs(hp % 2 - 1));
+	const m = l - c / 2;
+	let r = 0, g = 0, b = 0;
+	if (hp < 1) { r = c; g = x; }
+	else if (hp < 2) { r = x; g = c; }
+	else if (hp < 3) { g = c; b = x; }
+	else if (hp < 4) { g = x; b = c; }
+	else if (hp < 5) { r = x; b = c; }
+	else { r = c; b = x; }
+	return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
 /**
- * Blend a 256-color index toward the window background (Catppuccin Mocha base).
- * factor = 1 keeps the color unchanged, factor = 0 makes it the background color.
+ * Darken a 256-color index while preserving hue via HSL reduction.
+ * factor = 1 keeps the color unchanged, factor = 0 makes it black.
  */
-export function darkenColor(baseColor: number, factor = 0.25): number {
+export function darkenColor(baseColor: number, factor = 0.3): number {
 	if (baseColor >= 16 && baseColor <= 231) {
 		const [r, g, b] = cubeIndexToRgb(baseColor);
-		// Linear interpolation toward BG_RGB
-		const br = Math.round(r * factor + BG_RGB[0] * (1 - factor));
-		const bg = Math.round(g * factor + BG_RGB[1] * (1 - factor));
-		const bb = Math.round(b * factor + BG_RGB[2] * (1 - factor));
-		return rgbToCubeIndex(br, bg, bb);
+		const [h, s, l] = rgbToHsl(r, g, b);
+		// Reduce lightness while preserving hue and saturation
+		const [dr, dg, db] = hslToRgb(h, s, l * factor);
+		return rgbToCubeIndex(dr, dg, db);
 	}
-	// For system / grayscale colors: treat as gray, blend toward bg
-	const gray = Math.round(baseColor * factor + 30 * (1 - factor));
-	return Math.max(0, Math.min(255, gray));
+	return Math.round(baseColor * factor);
 }
 
 /**
