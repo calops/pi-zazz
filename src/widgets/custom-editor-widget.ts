@@ -15,13 +15,6 @@ import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory, WidgetInstance } from "./types.ts";
 import type { GridCellInfo } from "../grid/types.ts";
 
-// ── ANSI theme ──────────────────────────────────────────────────────
-
-const BG_DARK = "\x1b[48;2;35;37;44m";
-const BG_SEL = "\x1b[48;2;55;58;68m";
-const BG_RESET = "\x1b[49m";
-const FG_RESET = "\x1b[0m";
-
 // ── Completion overlay component ────────────────────────────────────
 
 class CompletionOverlayComponent implements Component {
@@ -35,18 +28,31 @@ class CompletionOverlayComponent implements Component {
 		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
 		const bright = (s: string) => `\x1b[1m${s}\x1b[22m`;
 
+		// Content width inside the border: │(space)…(space)│
+		const innerWidth = this.width - 4;
+
 		const lines: string[] = [];
+
+		// Top rounded border
+		lines.push(dim(`╭${`─`.repeat(Math.max(0, this.width - 2))}╮`));
+
 		for (let i = 0; i < this.items.length; i++) {
 			const item = this.items[i]!;
 			const isSel = i === this.selectedIdx;
-			const bg = isSel ? BG_SEL : BG_DARK;
-			let row = `  ${isSel ? bright(item.label) : dim(item.label)}`;
-			if (item.description) row += dim(`  ${item.description}`);
-			const vw = visibleWidth(row);
-			const pad = this.width - vw;
-			if (pad > 0) row += " ".repeat(pad);
-			lines.push(`${bg}${row}${BG_RESET}${FG_RESET}`);
+
+			// Selected item: ▶ prefix + bold; others: two spaces + dim
+			const prefix = isSel ? "▶ " : "  ";
+			let content = `${prefix}${isSel ? bright(item.label) : item.label}`;
+			if (item.description) content += dim(`  ${item.description}`);
+
+			const vw = visibleWidth(content);
+			const pad = Math.max(0, innerWidth - vw);
+			lines.push(dim("│ ") + content + " ".repeat(pad) + dim(" │"));
 		}
+
+		// Bottom rounded border
+		lines.push(dim(`╰${`─`.repeat(Math.max(0, this.width - 2))}╯`));
+
 		return lines;
 	}
 
@@ -161,13 +167,15 @@ class OverlayEditor extends Editor {
 
 		const popupH = items.length;
 
-		let maxLabel = 10;
+		// Measure content width (prefix 2 + label + optional "  " + description)
+		let maxContent = 10;
 		for (const item of items) {
-			let w = item.label.length + 2;
-			if (item.description) w += item.description.length + 4;
-			if (w > maxLabel) maxLabel = w;
+			let w = 2 + item.label.length;
+			if (item.description) w += 2 + item.description.length;
+			if (w > maxContent) maxContent = w;
 		}
-		const popupW = Math.min(Math.max(maxLabel, 20), 60);
+		// Add 4 for border overhead ("│ " left + " │" right)
+		const popupW = Math.min(Math.max(maxContent + 4, 24), 64);
 
 		const gridTop =
 			((this.deps as unknown as Record<string, unknown>).gridTopRow as
@@ -180,13 +188,18 @@ class OverlayEditor extends Editor {
 		const cursorTerminalRow =
 			gridTop + this.cell.terminalRow + cursorVisibleRow;
 
-		let popupRow = cursorTerminalRow - popupH;
+		// Total popup height = items + 2 border lines (top rounded + bottom rounded)
+		const totalPopupH = popupH + 2;
+		let popupRow = cursorTerminalRow - totalPopupH;
 		if (popupRow < 0) popupRow = cursorTerminalRow + 1;
 
 		// Popup's internal `  ` prefix aligns its text with the cursor's visual column.
 		const popupCol = this.cell.terminalCol + (cursor.col as number);
 		const termWidth = this.deps.tui.termWidth ?? 80;
-		const clampedCol = Math.min(popupCol, Math.max(0, termWidth - popupW));
+		const clampedCol = Math.max(
+			0,
+			Math.min(popupCol, Math.max(0, termWidth - popupW)),
+		);
 
 		this.completionComponent = new CompletionOverlayComponent();
 		this.completionComponent.items = items;
