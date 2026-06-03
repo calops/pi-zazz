@@ -7,8 +7,10 @@ export interface PillExtension {
 	text: string;
 	/** Visible width of the text */
 	width: number;
-	/** Background color index (darkened version of the main pill's bg) */
-	darkBg: number;
+	/** Background RGB for true color ANSI (darkened via blendTowardBg) */
+	darkR: number;
+	darkG: number;
+	darkB: number;
 	/** Foreground color index (the main pill's main/accent color) */
 	mainFg: number;
 }
@@ -48,92 +50,36 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-// 6×6×6 cube: component index → actual RGB value
-const CUBE_LEVELS = [0, 95, 135, 175, 215, 255];
+// Window background (Catppuccin Mocha base #1e1e2e)
+const BG_RGB: [number, number, number] = [30, 30, 46];
 
-/** Convert a 6×6×6 cube color index (16-231) to actual RGB. */
-function cubeIndexToRgb(idx: number): [number, number, number] {
-	const n = idx - 16;
-	const ri = Math.floor(n / 36);
-	const gi = Math.floor((n % 36) / 6);
-	const bi = n % 6;
-	return [CUBE_LEVELS[ri]!, CUBE_LEVELS[gi]!, CUBE_LEVELS[bi]!];
-}
-
-/** Find the nearest 6×6×6 cube index for an RGB value, biasing G down when blue dominates. */
-function rgbToCubeIndex(r: number, g: number, b: number): number {
-	// The 6×6×6 cube jumps from G=0 (0) to G=1 (95) — dark blues with moderate
-	// green snap to teal. When blue is the primary channel, penalize G>0 hard.
-	const penalizeGreen = b > r && b > g;
-	let best = 0;
-	let bestDist = Infinity;
-	for (let ri = 0; ri < 6; ri++) {
-		for (let gi = 0; gi < 6; gi++) {
-			for (let bi = 0; bi < 6; bi++) {
-				const gv = CUBE_LEVELS[gi]!;
-				let d =
-					Math.abs(r - CUBE_LEVELS[ri]!) +
-					Math.abs(g - gv) +
-					Math.abs(b - CUBE_LEVELS[bi]!);
-				// When blue dominates, any green at level >= 95 is penalized heavily
-				// so dark blues don't snap to teal.
-				if (penalizeGreen && gv >= 95) d += 100;
-				if (d < bestDist) {
-					bestDist = d;
-					best = 16 + ri * 36 + gi * 6 + bi;
-				}
-			}
-		}
-	}
-	return best;
-}
-
-/** Convert RGB to HSL. */
-function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
-	r /= 255; g /= 255; b /= 255;
-	const max = Math.max(r, g, b), min = Math.min(r, g, b);
-	const l = (max + min) / 2;
-	if (max === min) return [0, 0, l];
-	const d = max - min;
-	const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-	let h = 0;
-	switch (max) {
-		case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-		case g: h = ((b - r) / d + 2) / 6; break;
-		case b: h = ((r - g) / d + 4) / 6; break;
-	}
-	return [h * 360, s, l];
-}
-
-/** Convert HSL to RGB. */
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-	const c = (1 - Math.abs(2 * l - 1)) * s;
-	const hp = h / 60;
-	const x = c * (1 - Math.abs(hp % 2 - 1));
-	const m = l - c / 2;
-	let r = 0, g = 0, b = 0;
-	if (hp < 1) { r = c; g = x; }
-	else if (hp < 2) { r = x; g = c; }
-	else if (hp < 3) { g = c; b = x; }
-	else if (hp < 4) { g = x; b = c; }
-	else if (hp < 5) { r = x; b = c; }
-	else { r = c; b = x; }
-	return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+/**
+ * Blend a color toward the window background using linear RGB interpolation
+ * (snacks.nvim's blend formula). Returns RGB triple for direct use in true
+ * color ANSI codes instead of quantizing through the 6×6×6 cube.
+ */
+export function blendTowardBg(
+	baseR: number,
+	baseG: number,
+	baseB: number,
+	alpha = 0.3,
+): [number, number, number] {
+	return [
+		Math.round(alpha * baseR + (1 - alpha) * BG_RGB[0]),
+		Math.round(alpha * baseG + (1 - alpha) * BG_RGB[1]),
+		Math.round(alpha * baseB + (1 - alpha) * BG_RGB[2]),
+	];
 }
 
 /**
- * Darken a 256-color index while preserving hue via HSL reduction.
- * factor = 1 keeps the color unchanged, factor = 0 makes it black.
+ * Darken a 256-color index by blending toward the window background.
+ * The result is a 256-color index (falls back to nearest cube entry when
+ * true color isn't needed).
  */
-export function darkenColor(baseColor: number, factor = 0.3): number {
-	if (baseColor >= 16 && baseColor <= 231) {
-		const [r, g, b] = cubeIndexToRgb(baseColor);
-		const [h, s, l] = rgbToHsl(r, g, b);
-		// Reduce lightness while preserving hue and saturation
-		const [dr, dg, db] = hslToRgb(h, s, l * factor);
-		return rgbToCubeIndex(dr, dg, db);
-	}
-	return Math.round(baseColor * factor);
+export function darkenColor(baseColor: number, alpha = 0.3): number {
+	// The 6×6×6 cube is too coarse for proper darkening. Callers that need
+	// precision should use blendTowardBg() with true color ANSI codes.
+	return Math.round(baseColor * alpha);
 }
 
 /**
@@ -155,11 +101,11 @@ function renderPill(
 			p.text +
 			// Closing  transitions to extension bg when present, otherwise terminal default
 			(hasRightExt && p.rightExt
-				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;5;${p.rightExt.darkBg}m\u{E0B4}\x1b[0m` +
-					// Extension content (blended under the )
-					`\x1b[48;5;${p.rightExt.darkBg}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
-					// Extension closing 
-					`\x1b[38;5;${p.rightExt.darkBg}m\x1b[49m\u{E0B4}\x1b[0m`
+				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\u{E0B4}\x1b[0m` +
+					// Extension content (blended under the , true color bg)
+					`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
+					// Extension closing  (true color)
+					`\x1b[38;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[49m\u{E0B4}\x1b[0m`
 				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
 			// Single space between pills
 			(trailingSpace ? " " : "")
@@ -169,13 +115,27 @@ function renderPill(
 	return p.text + (trailingSpace ? fallbackSep : "");
 }
 
-/** Build a PillExtension from raw text and the main pill's base bg color. */
+/** 6×6×6 cube level → actual RGB value. */
+function cubeLevelRgb(idx: number): [number, number, number] {
+	const levels = [0, 95, 135, 175, 215, 255];
+	const n = idx - 16;
+	return [
+		levels[Math.floor(n / 36)]!,
+		levels[Math.floor((n % 36) / 6)]!,
+		levels[n % 6]!,
+	];
+}
+
+/** Build a PillExtension from raw text and the main pill's base 256-color bg. */
 export function makeExtension(text: string, baseBg: number): PillExtension {
-	const darkBg = darkenColor(baseBg);
+	const [r, g, b] = cubeLevelRgb(baseBg);
+	const [dr, dg, db] = blendTowardBg(r, g, b);
 	return {
 		text,
 		width: visibleWidth(text),
-		darkBg,
+		darkR: dr,
+		darkG: dg,
+		darkB: db,
 		mainFg: baseBg,
 	};
 }
