@@ -94,9 +94,47 @@ export const statusBarWidgetFactory: WidgetFactory = (
 		getThinkingLevel?: () => string;
 	};
 
+	function refreshGitStatus(): void {
+		try {
+			const { execSync } = require("node:child_process") as {
+				execSync: (cmd: string, opts: { cwd?: string; encoding: string }) => string;
+			};
+			const opts = { cwd: cachedCwd, encoding: "utf-8" };
+			const branch = execSync(
+				"git branch --show-current 2>/dev/null || true",
+				opts,
+			).trim();
+			const status = execSync(
+				"git status --porcelain 2>/dev/null || true",
+				opts,
+			);
+			let staged = 0,
+				unstaged = 0,
+				untracked = 0;
+			for (const line of status.split("\n")) {
+				if (!line.trim()) continue;
+				const code = line.slice(0, 2);
+				if (code[0] !== " ") staged++;
+				if (code[1] !== " ") unstaged++;
+				if (line.startsWith("?")) untracked++;
+			}
+			cachedGit.branch = branch || null;
+			cachedGit.staged = staged;
+			cachedGit.unstaged = unstaged;
+			cachedGit.untracked = untracked;
+		} catch {
+			/* not a git repo or git not available */
+		}
+	}
+
 	pi.on("session_start", (_event: unknown, ctx: { cwd?: string }) => {
 		cachedSessionStartTime = Date.now();
 		cachedCwd = ctx.cwd ?? process.cwd();
+		refreshGitStatus();
+	});
+
+	pi.on("turn_end", () => {
+		refreshGitStatus();
 	});
 
 	pi.on("model_select", (event: unknown) => {

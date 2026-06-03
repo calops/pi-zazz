@@ -145,19 +145,20 @@ export const SEGMENTS: Record<
 		if (!branch && staged === 0 && unstaged === 0 && untracked === 0) {
 			return { text: "", visible: false };
 		}
-		const parts: string[] = [];
+		let text = "";
 		if (opts.showBranch !== false && branch) {
-			parts.push(withIcon(icon("branch"), branch));
+			text = withIcon(icon("branch"), branch);
 		}
 		const indicators: string[] = [];
-		if (opts.showUnstaged !== false && unstaged > 0)
-			indicators.push(`${icon("unstaged")}${unstaged}`);
 		if (opts.showStaged !== false && staged > 0)
 			indicators.push(`${icon("staged")}${staged}`);
+		if (opts.showUnstaged !== false && unstaged > 0)
+			indicators.push(`${icon("unstaged")}${unstaged}`);
 		if (opts.showUntracked !== false && untracked > 0)
 			indicators.push(`${icon("untracked")}${untracked}`);
-		if (indicators.length > 0) parts.push(indicators.join(" "));
-		return { text: parts.join(" "), visible: true };
+		const rightExtension =
+			indicators.length > 0 ? indicators.join(" ") : undefined;
+		return { text, visible: true, rightExtension };
 	},
 
 	thinking(ctx): RenderedSegment {
@@ -217,7 +218,14 @@ export const SEGMENTS: Record<
 		if (ctx.customCompactionEnabled) return { text: "", visible: false };
 		const pct = ctx.contextPercent;
 		const text = `${pct.toFixed(1)}%/${formatTokens(ctx.contextWindow)}${ctx.autoCompactEnabled ? ` ${icon("autoCompact")}` : ""}`;
-		return { text: withIcon(icon("context"), text), visible: true };
+		let rightExtension: string | undefined;
+		if (ctx.cost || ctx.usingSubscription) {
+			const display = ctx.usingSubscription
+				? "(sub)"
+				: `$${ctx.cost.toFixed(2)}`;
+			rightExtension = `${icon("cost")} ${display}`;
+		}
+		return { text: withIcon(icon("context"), text), visible: true, rightExtension };
 	},
 
 	context_total(ctx): RenderedSegment {

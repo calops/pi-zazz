@@ -15,7 +15,7 @@ export const DEFAULT_GRID: GridConfig = {
 						type: "status-bar",
 						config: {
 							separator: "powerline-thin",
-							leftSegments: ["model"],
+							leftSegments: ["model", "path", "git", "context_pct"],
 							rightSegments: [],
 							segmentOptions: {
 								model: { showThinkingLevel: true },
