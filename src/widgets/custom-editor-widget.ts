@@ -49,7 +49,7 @@ class CompletionOverlayComponent implements Component {
 			// Truncate content that spills past the right border
 			const truncated =
 				visibleWidth(content) > innerWidth
-					? truncateToWidth(content, innerWidth)
+					? truncateToWidth(content, innerWidth, "…")
 					: content;
 			const tw = visibleWidth(truncated);
 			const pad = Math.max(0, innerWidth - tw);
