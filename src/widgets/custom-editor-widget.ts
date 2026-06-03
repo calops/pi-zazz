@@ -268,7 +268,7 @@ export const customEditorWidgetFactory: WidgetFactory = (
 	};
 
 	const editor = new OverlayEditor(tui, editorTheme, {
-		autocompleteMaxVisible: 6,
+		autocompleteMaxVisible: 20,
 	});
 
 	if (provider) editor.setup(cell, deps, provider);
