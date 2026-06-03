@@ -175,7 +175,9 @@ class OverlayEditor extends Editor {
 			if (w > maxContent) maxContent = w;
 		}
 		// Add 4 for border overhead ("│ " left + " │" right)
-		const popupW = Math.min(Math.max(maxContent + 4, 24), 64);
+		// Soften the right edge by widening the popup by 1 column so content
+		// never visually collides with the right border.
+		const popupW = Math.min(Math.max(maxContent + 5, 25), 64);
 
 		const gridTop =
 			((this.deps as unknown as Record<string, unknown>).gridTopRow as
