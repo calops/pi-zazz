@@ -26,13 +26,18 @@ let reservedEditorHeight = 0;
  */
 const editorBridge: {
 	handleInput: ((data: string) => boolean) | null;
+	onSubmit: ((text: string) => void) | null;
 	getText: () => string;
 	setText: (text: string) => void;
 } = {
 	handleInput: null,
+	onSubmit: null,
 	getText: () => "",
 	setText: () => {},
 };
+
+/** Holds a reference to the StubEditor so editorBridge can reach its onSubmit. */
+let stubEditorRef: StubEditor | null = null;
 
 /**
  * StubEditor replaces the built-in editor, rendering nothing visually
@@ -149,7 +154,10 @@ export default function (pi: ExtensionAPI) {
 			// equal to the grid height. The overlay updates reservedEditorHeight
 			// each render so messages stop exactly above the grid.
 			ctx.ui.setEditorComponent?.(
-				(tui, theme, kb) => new StubEditor(tui, theme, kb),
+				(tui, theme, kb) => {
+					stubEditorRef = new StubEditor(tui, theme, kb);
+					return stubEditorRef;
+				},
 			);
 		} catch {
 			/* non-critical */
@@ -210,6 +218,9 @@ export default function (pi: ExtensionAPI) {
 				editorBridge.handleInput = (data) => grid.handleInput(data);
 				editorBridge.getText = () => grid.getText();
 				editorBridge.setText = (text) => grid.setText(text);
+				// Forward submit through StubEditor so slash commands (/model, /settings,
+				// etc.) are processed by pi's command handler before sending the message.
+				editorBridge.onSubmit = (text) => stubEditorRef?.onSubmit?.(text);
 
 				// Initial height estimate from the default layout so the
 				// stub editor reserves space even before the first render.
