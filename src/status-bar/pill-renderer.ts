@@ -102,8 +102,8 @@ function renderPill(
 			// Closing  transitions to extension bg when present, otherwise terminal default
 			(hasRightExt && p.rightExt
 				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\u{E0B4}\x1b[0m` +
-					// Extension content (blended under the , padded on the pill side)
-					`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m ${p.rightExt.text}\x1b[0m` +
+					// Extension content (blended under the )
+					`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
 					// Extension closing  (true color)
 					`\x1b[38;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[49m\u{E0B4}\x1b[0m`
 				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
@@ -130,11 +130,9 @@ function cubeLevelRgb(idx: number): [number, number, number] {
 export function makeExtension(text: string, baseBg: number): PillExtension {
 	const [r, g, b] = cubeLevelRgb(baseBg);
 	const [dr, dg, db] = blendTowardBg(r, g, b);
-	// Leading space on the pill side
-	const padded = ` ${text}`;
 	return {
-		text: padded,
-		width: visibleWidth(padded),
+		text,
+		width: visibleWidth(text),
 		darkR: dr,
 		darkG: dg,
 		darkB: db,
