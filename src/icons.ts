@@ -14,7 +14,7 @@ export const ICONS = {
 	folder: "\u{F07B}", // nf-fa-folder 
 
 	// Git
-	branch: "\u{E725}", // nf-dev-git_branch 
+	branch: "\u{F126}", // nf-fa-code_fork 
 	git: "\u{F1D3}", // nf-fa-git 
 	staged: "\u{F4D2}", // nf-oct-diff 
 	unstaged: "\u{F4D6}", // nf-oct-diff 
