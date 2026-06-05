@@ -18,17 +18,12 @@ import { initializePalette } from "./terminal-palette.ts";
 // Side-effect imports: register built-in widgets
 import "./widgets/custom-editor-widget.ts";
 import "./widgets/status-bar-widget.ts";
-import "./widgets/lens-widget.ts";
-import "./widgets/task-list-widget.ts";
+import "./widgets/extensions-host-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
 
-// Subscribe to pi-lens events from the shared event bus so our lens
-// widget receives diagnostics data regardless of widget factory timing.
-import { subscribeToLensEvents } from "./lens-data-bridge.ts";
-
-// Subscribe to task tool execution events to track task state for the
-// grid's task-list widget.
-import { subscribeToTaskEvents } from "./task-data-bridge.ts";
+// Generic widget capturer: intercepts all setWidget() calls so extension
+// UI renders inside the grid instead of pi's built-in TUI.
+import { capture, captureLines, release, setContext } from "./widget-capturer.ts";
 
 // Captured by setFooter callback for reading extension statuses.
 // Lazy: populated during TUI render (first callback invocation).
@@ -226,15 +221,6 @@ export default function (pi: ExtensionAPI) {
 
 	let requestRenderFn: (() => void) | null = null;
 
-	// Subscribe to pi-lens diagnostics events at the extension level
-	// (outside the widget factory) so the shared data bridge is always
-	// populated regardless of widget creation timing.
-	subscribeToLensEvents(pi.events);
-
-	// Subscribe to task tool execution events at the extension level
-	// so the task data bridge tracks task state for the grid widget.
-	subscribeToTaskEvents(pi as never);
-
 	// --- Session lifecycle ---
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
@@ -287,6 +273,10 @@ export default function (pi: ExtensionAPI) {
 		// We never call close() — the overlay stays for the entire session
 		void ui.custom(
 			(tui, theme, keybindings, _close) => {
+				// Provide TUI/Theme to the widget capturer so it can lazily
+				// create captured widget components when they're first rendered.
+				setContext(tui as never, theme as never);
+
 				// Build widget deps
 				const deps: Record<string, unknown> = {
 					pi: pi as unknown,
@@ -415,22 +405,32 @@ export default function (pi: ExtensionAPI) {
 				},
 			},
 		);
-		// Suppress pi-lens native widget by intercepting setWidget calls.
-		// This is more reliable than clearing after the fact — pi-lens's
-		// session_start may run after ours regardless of extension load order.
+		// Intercept ALL setWidget calls generically: capture the factories
+		// for rendering in the grid's extensions-host widget instead of
+		// displaying them in pi's built-in TUI.
 		{
 			const plUi = ctx.ui as unknown as {
 				setWidget?: (
 					key: string,
-					content: undefined | ((tui: unknown, theme: unknown) => unknown),
+					content:
+						| undefined
+						| string[]
+						| ((tui: unknown, theme: unknown) => unknown),
+					doptions?: { placement?: string },
 				) => void;
 			};
 			const origSetWidget = plUi.setWidget?.bind(plUi);
 			if (origSetWidget) {
 				plUi.setWidget = (key, content) => {
-					if (key === "pi-lens") return; // suppress pi-lens
-					if (key === "tasks") return; // suppress @tintinweb/pi-tasks widget
-					origSetWidget(key, content);
+					if (content === undefined || content === null) {
+						release(key);
+					} else if (typeof content === "function") {
+						capture(key, content as never);
+					} else if (Array.isArray(content)) {
+						captureLines(key, content);
+					}
+					// Don't call origSetWidget — all extension widgets render
+					// through the grid's extensions-host.
 				};
 			}
 		}

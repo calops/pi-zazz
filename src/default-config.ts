@@ -5,21 +5,20 @@ export const DEFAULT_GRID: GridConfig = {
 	minHeight: 8,
 	rows: [
 		{
-			id: "lints",
+			id: "extensions",
 			height: { min: 0, max: 12 },
 			columns: [
 				{
-					id: "lens",
-					width: { fraction: 1 },
+					id: "host",
+					width: {},
 					scrollable: true,
-					widget: { type: "pi-lens", config: { maxDiagnostics: 20 } },
-				},
-				{
-					id: "tasks",
-					width: { fraction: 1 },
-					border: { char: "│", color: "border" },
-					scrollable: true,
-					widget: { type: "tasks", config: {} },
+					widget: {
+						type: "extensions-host",
+						config: {
+							maxWidgetsPerRow: 2,
+							minWidgetWidth: 40,
+						},
+					},
 				},
 			],
 		},
