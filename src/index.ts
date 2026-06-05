@@ -23,7 +23,12 @@ import "./widgets/prompt-bar-widget.ts";
 
 // Generic widget capturer: intercepts all setWidget() calls so extension
 // UI renders inside the grid instead of pi's built-in TUI.
-import { capture, captureLines, release, setContext } from "./widget-capturer.ts";
+import {
+	capture,
+	captureLines,
+	release,
+	setContext,
+} from "./widget-capturer.ts";
 
 // Captured by setFooter callback for reading extension statuses.
 // Lazy: populated during TUI render (first callback invocation).

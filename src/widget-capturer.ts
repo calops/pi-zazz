@@ -24,10 +24,6 @@ interface CapturedFactory {
 	component: (Component & { dispose?(): void }) | null;
 	/** Whether the last render returned non-empty output. */
 	hasContent: boolean;
-	/** Cached render lines (for invalidation tracking). */
-	cachedLines: string[] | null;
-	/** Width used for cached render. */
-	cachedWidth: number;
 }
 
 interface CapturedLines {
@@ -73,8 +69,6 @@ export function capture(
 		factory,
 		component: null,
 		hasContent: false,
-		cachedLines: null,
-		cachedWidth: 0,
 	});
 	onChangeFn?.();
 }
@@ -96,23 +90,14 @@ export function release(key: string): void {
 	onChangeFn?.();
 }
 
-/** Invalidate a single widget's cached output. */
-export function invalidate(key: string): void {
-	const entry = entries.get(key);
-	if (entry?.type === "factory") {
-		entry.cachedLines = null;
-		entry.cachedWidth = 0;
-	}
+/** Invalidate — no-op since we no longer cache render output. */
+export function invalidate(_key: string): void {
+	// Render output is always fresh; component is cached and reused.
 }
 
-/** Invalidate all cached outputs. */
+/** Invalidate all — no-op for same reason. */
 export function invalidateAll(): void {
-	for (const entry of entries.values()) {
-		if (entry.type === "factory") {
-			entry.cachedLines = null;
-			entry.cachedWidth = 0;
-		}
-	}
+	// No-op
 }
 
 /**
@@ -138,12 +123,7 @@ export function renderWidget(key: string, width: number): string[] {
 		}
 	}
 
-	// Use cached output if width matches
-	if (entry.cachedLines && entry.cachedWidth === width) {
-		return entry.cachedLines;
-	}
-
-	// Render
+	// Render (no caching — component internal state may change between renders)
 	let lines: string[];
 	try {
 		lines = entry.component.render(width);
@@ -151,16 +131,14 @@ export function renderWidget(key: string, width: number): string[] {
 		lines = [wrapError(`⚠ "${key}" widget error`)];
 	}
 
-	entry.cachedLines = lines;
-	entry.cachedWidth = width;
 	entry.hasContent = lines.length > 0 && lines.some((l) => l.trim().length > 0);
 	return lines;
 }
 
 /**
  * Get keys whose last render returned non-empty output.
- * For factory widgets that haven't rendered yet, attempts a render at a
- * conservative default width to check for content.
+ * Always re-renders inactive widgets to detect content changes
+ * (component internal state may change between renders).
  */
 export function getActiveKeys(defaultWidth = 40): string[] {
 	const active: string[] = [];
@@ -170,8 +148,9 @@ export function getActiveKeys(defaultWidth = 40): string[] {
 		} else if (entry.type === "factory") {
 			if (entry.hasContent) {
 				active.push(key);
-			} else if (!entry.component) {
-				// Never rendered — try a quick render to check for content
+			} else {
+				// Component exists but had no content last time —
+				// re-render to pick up any new internal state
 				renderWidget(key, defaultWidth);
 				if (entry.hasContent) active.push(key);
 			}

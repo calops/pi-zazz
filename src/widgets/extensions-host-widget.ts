@@ -110,10 +110,7 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 				if (allLines.length >= maxHeight) break;
 
 				// Determine sub-row height = tallest widget in this row
-				const rowHeight = Math.max(
-					1,
-					...subRow.map((c) => c.lines.length),
-				);
+				const rowHeight = Math.max(1, ...subRow.map((c) => c.lines.length));
 
 				for (let li = 0; li < rowHeight && allLines.length < maxHeight; li++) {
 					let composedLine = "";
@@ -135,7 +132,8 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 							composedLine += truncateToWidth(cellLine, allocatedWidth);
 						} else {
 							// Pad to match allocated width
-							composedLine += cellLine + " ".repeat(allocatedWidth - visibleCellWidth);
+							composedLine +=
+								cellLine + " ".repeat(allocatedWidth - visibleCellWidth);
 						}
 					}
 
