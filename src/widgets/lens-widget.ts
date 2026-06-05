@@ -47,6 +47,11 @@ export const lensWidgetFactory: WidgetFactory = (
 	deps: WidgetDeps,
 	_config: unknown,
 ) => {
+	// ── Scroll state ─────────────────────────────────────────────────────────
+	let scrollOffset = 0;
+	let totalContentLines = 0;
+	let lastFilesSize = -1;
+
 	return {
 		/** Signal to the grid: hide this cell when no data is available. */
 		heightConstraint(): { min: number; max: number } {
@@ -64,11 +69,10 @@ export const lensWidgetFactory: WidgetFactory = (
 		/**
 		 * Render the full pi-lens display.
 		 *
-		 * `height` is the row's maxHeight (configured in the grid config).
-		 * The widget uses it as an output budget — it tries to fill as many
-		 * lines as possible with useful content (header → file rows → diagnostics).
-		 * The grid component then determines the row's effective height from
-		 * `lines.length`, clamped to the row's [min, max] range.
+		 * Builds ALL content lines (header, file rows, blocking diagnostics) without
+		 * capping to `height`. After building all lines, stores `totalContentLines`
+		 * and returns a viewport slice based on `scrollOffset`. This enables
+		 * scrolling through the full diagnostic output.
 		 */
 		render(width: number, height: number): string[] {
 			setRenderCallback(() => deps.tui.requestRender?.());
@@ -101,7 +105,12 @@ export const lensWidgetFactory: WidgetFactory = (
 				}
 			}
 
-			const maxOutput = Math.max(1, height);
+			// ── Scroll state: detect data changes → reset scroll to top ───────
+			if (files.size !== lastFilesSize) {
+				scrollOffset = 0;
+				lastFilesSize = files.size;
+			}
+
 			const lines: string[] = [];
 
 			// ── Header (always) ─────────────────────────────────────────────────
@@ -127,54 +136,32 @@ export const lensWidgetFactory: WidgetFactory = (
 			const fileCount = dim(`${files.size} file${files.size !== 1 ? "s" : ""}`);
 			const header = ` ${cyan("pi-lens")}${langStr ? "  " + dim(langStr) : ""}${summary ? "  " + summary : ""}  ${fileCount}`;
 			lines.push(fitLine(header, w));
-			if (lines.length >= maxOutput) return lines;
 
 			// ── File rows — ALL files sorted by tier then recency ──────────────
 			const sorted = sortByTierThenRecency([...files.values()]);
 
 			if (useHorizontal) {
-				// Horizontal mode: file rows take 1 line, rest goes to diagnostics
+				// Horizontal mode: files packed into a single line (width-limited)
 				const rowLine = packHorizontalRow(sorted, w, dim, red, yellow, green);
 				if (rowLine.length > 0) lines.push(rowLine);
 			} else {
-				// Vertical mode: split remaining budget ~50/50 between file rows and diagnostics
-				const remaining = maxOutput - lines.length;
-				// Reserve about half for diagnostics + divider + filename
-				const diagReserve = Math.min(
-					sorted.some((r) => r.diagnostics.some(isBlocking)) ? 4 : 0,
-					Math.max(2, Math.floor(remaining * 0.45)),
-				);
-				const maxFiles = remaining - diagReserve;
-				let fileCount = 0;
+				// Vertical mode: show ALL files, one per line
 				for (const rec of sorted) {
-					if (fileCount >= maxFiles) break;
 					lines.push(formatFileRow(rec, dim, red, yellow, green));
-					fileCount++;
-				}
-				// If some files were left out, show overflow count
-				if (fileCount < sorted.length) {
-					const overflow = sorted.length - fileCount;
-					lines.push(`   ${dim(`… +${overflow} more`)}`);
 				}
 			}
-			if (lines.length >= maxOutput) return lines;
 
 			// ── Blocking diagnostics (single most recent file with blockers) ──
 			const withBlocking = sorted.filter((r) => r.diagnostics.some(isBlocking));
 			if (withBlocking.length > 0) {
 				const rec = withBlocking[0]!;
 				const blockers = rec.diagnostics.filter(isBlocking).slice(0, 5);
-				if (blockers.length > 0 && lines.length < maxOutput) {
+				if (blockers.length > 0) {
 					if (!useHorizontal) {
 						lines.push(fitLine(dim("─".repeat(Math.min(w, 60))), w));
-						if (lines.length < maxOutput) {
-							lines.push(fitLine(` ${dim(basename(rec.filePath))}`, w));
-						}
+						lines.push(fitLine(` ${dim(basename(rec.filePath))}`, w));
 					}
-					const remaining = maxOutput - lines.length;
-					const shown = blockers.slice(0, remaining);
-					for (const d of shown) {
-						if (lines.length >= maxOutput) break;
+					for (const d of blockers) {
 						const loc = d.line != null ? `L${d.line}` : "";
 						const rule = d.rule ? dim(` ${d.rule}`) : "";
 						const prefix = `   ${red("●")} ${loc}${rule}  `;
@@ -185,10 +172,31 @@ export const lensWidgetFactory: WidgetFactory = (
 				}
 			}
 
-			return lines;
+			// ── Store total content height and return visible viewport slice ──
+			totalContentLines = lines.length;
+			scrollOffset = Math.max(
+				0,
+				Math.min(scrollOffset, Math.max(0, totalContentLines - height)),
+			);
+			return lines.slice(scrollOffset, scrollOffset + height);
 		},
 
-		invalidate(): void {},
+		scrollBy(delta: number): void {
+			scrollOffset = Math.max(0, scrollOffset + delta);
+			deps.tui.requestRender?.();
+		},
+
+		getScrollOffset(): number {
+			return scrollOffset;
+		},
+
+		getContentHeight(): number {
+			return totalContentLines;
+		},
+
+		invalidate(): void {
+			scrollOffset = 0;
+		},
 	};
 };
 

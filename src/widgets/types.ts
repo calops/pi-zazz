@@ -18,13 +18,16 @@ export interface WidgetDeps {
 	gridRef?: {
 		hitTest(row: number, col: number): string | null;
 		scrollCell(cellId: string, direction: number): void;
-		cellBounds: Map<string, {
-			rowStart: number;
-			rowEnd: number;
-			colStart: number;
-			colEnd: number;
-			scrollable: boolean;
-		}>;
+		cellBounds: Map<
+			string,
+			{
+				rowStart: number;
+				rowEnd: number;
+				colStart: number;
+				colEnd: number;
+				scrollable: boolean;
+			}
+		>;
 	};
 
 	/**

@@ -16,7 +16,19 @@ export class GridComponent {
 	private deps: WidgetDeps;
 	private widgets: Map<string, WidgetInstance> = new Map();
 	private borderColorFn: (text: string) => string;
+	private dimColorFn: (text: string) => string;
+	private accentColorFn: (text: string) => string;
 	private onInvalidate: (() => void) | null = null;
+	private cellBounds: Map<
+		string,
+		{
+			rowStart: number;
+			rowEnd: number;
+			colStart: number;
+			colEnd: number;
+			scrollable: boolean;
+		}
+	> = new Map();
 
 	constructor(
 		tui: TUI,
@@ -28,6 +40,8 @@ export class GridComponent {
 		this.config = config;
 		this.deps = deps;
 		this.borderColorFn = deps.theme.fg.bind(deps.theme, "border");
+		this.dimColorFn = deps.theme.fg.bind(deps.theme, "dim");
+		this.accentColorFn = deps.theme.fg.bind(deps.theme, "accent");
 		(deps as unknown as Record<string, unknown>).tui = tui;
 		(deps as unknown as Record<string, unknown>).gridRef = this;
 	}
@@ -38,6 +52,8 @@ export class GridComponent {
 		const plan = computeLayout(this.config, width, termHeight);
 
 		if (plan.fallback) return [];
+
+		this.cellBounds.clear();
 
 		let terminalRow = 0;
 		const allLines: string[] = [];
@@ -71,8 +87,10 @@ export class GridComponent {
 				}
 
 				// ── Redistribute width among visible columns ───────────────────
-				const redistributed: Array<{ layout: ColumnLayout; width: number }> =
-					[];
+				const redistributed: Array<{
+					layout: ColumnLayout;
+					width: number;
+				}> = [];
 				if (visibleIndices.length === 1) {
 					const col = row.columns[visibleIndices[0]!]!;
 					redistributed.push({
@@ -116,21 +134,65 @@ export class GridComponent {
 					}
 				}
 
-				// ── Render visible columns ─────────────────────────────────────
+				// ── Phase A: Determine scrollbar needs ────────────────────────
+				const scrollbarData = new Map<
+					string,
+					{ chars: string[]; contentWidth: number }
+				>();
+
+				for (let vi = 0; vi < redistributed.length; vi++) {
+					const rw = redistributed[vi]!;
+					if (!rw.layout.scrollable) continue;
+
+					const key = `${row.id}:${rw.layout.id}`;
+					const widget = this.widgets.get(key);
+					if (!widget?.getContentHeight) continue;
+
+					const contentHeight = widget.getContentHeight();
+					if (contentHeight <= row.maxHeight) continue; // no overflow
+
+					const viewportHeight = Math.max(1, row.maxHeight);
+					const maxOffset = Math.max(1, contentHeight - viewportHeight);
+					const scrollOff = widget.getScrollOffset?.() ?? 0;
+					const thumbRow = Math.round(
+						(scrollOff / maxOffset) * (viewportHeight - 1),
+					);
+
+					const chars: string[] = [];
+					for (let li = 0; li < viewportHeight; li++) {
+						chars.push(
+							li === thumbRow ? this.accentColorFn("█") : this.dimColorFn("│"),
+						);
+					}
+
+					scrollbarData.set(key, {
+						chars,
+						contentWidth: rw.width - 1,
+					});
+				}
+
+				// ── Phase B: Render widgets ────────────────────────────────────
 				let maxCellHeight = 0;
 				const cellLines: string[][] = [];
-				for (const { layout: col, width: w } of redistributed) {
+				for (let vi = 0; vi < redistributed.length; vi++) {
+					const rw = redistributed[vi]!;
+					const key = `${row.id}:${rw.layout.id}`;
+					const sbData = scrollbarData.get(key);
+					const renderWidth = sbData ? sbData.contentWidth : rw.width;
+
 					const widget = this.getWidget(
-						col.id,
+						rw.layout.id,
 						row.id,
-						row.columns.findIndex((c) => c.id === col.id),
+						row.columns.findIndex((c) => c.id === rw.layout.id),
 						terminalRow,
 						0,
 					);
-					const lines = widget.render(w, row.maxHeight);
+					const lines = widget.render(renderWidth, row.maxHeight);
 					cellLines.push(lines);
 					maxCellHeight = Math.max(maxCellHeight, lines.length);
 				}
+
+				// ── Phase C: Compose final lines with scrollbar ───────────────
 				const effectiveHeight = Math.max(
 					row.minHeight,
 					Math.min(maxCellHeight, row.maxHeight),
@@ -143,15 +205,48 @@ export class GridComponent {
 							composed += this.borderColorFn("│");
 						}
 						const cellLine = cellLines[vi]![lineIdx] ?? "";
-						composed += this.clampLine(cellLine, rw.width);
+						const key = `${row.id}:${rw.layout.id}`;
+						const sbData = scrollbarData.get(key);
+
+						if (sbData) {
+							composed += this.clampLine(cellLine, sbData.contentWidth);
+							composed += sbData.chars[lineIdx] ?? " ";
+						} else {
+							composed += this.clampLine(cellLine, rw.width);
+						}
 					}
 					allLines.push(this.clampLine(composed, width));
 				}
+
+				// ── Phase D: Record cellBounds (relative to grid top) ────────
+				let colAccum = 0;
+				for (let vi = 0; vi < redistributed.length; vi++) {
+					const rw = redistributed[vi]!;
+					if (rw.layout.borderLeft) colAccum += 1;
+
+					const key = `${row.id}:${rw.layout.id}`;
+					this.cellBounds.set(key, {
+						rowStart: terminalRow,
+						rowEnd: terminalRow + effectiveHeight,
+						colStart: colAccum,
+						colEnd: colAccum + rw.width,
+						scrollable: rw.layout.scrollable,
+					});
+					colAccum += rw.width;
+				}
+
 				terminalRow += effectiveHeight;
 			}
 		}
 		const tuiObj = this.deps.tui as unknown as TUI;
 		const gridTopRow = tuiObj.terminal.rows - allLines.length;
+
+		// Offset all cellBounds by gridTopRow to get terminal-absolute coordinates
+		for (const [, bounds] of this.cellBounds) {
+			bounds.rowStart += gridTopRow;
+			bounds.rowEnd += gridTopRow;
+		}
+
 		(this.deps as unknown as Record<string, unknown>).gridTopRow = gridTopRow;
 
 		return allLines;
@@ -191,6 +286,39 @@ export class GridComponent {
 
 	setOnInvalidate(fn: () => void): void {
 		this.onInvalidate = fn;
+	}
+
+	/**
+	 * Hit-test: given 1-based terminal coordinates (as received from SGR mouse events),
+	 * return the cellId (rowId:colId) of the cell at that position, or null.
+	 */
+	hitTest(row: number, col: number): string | null {
+		// Convert 1-based to 0-based
+		const r = row - 1;
+		const c = col - 1;
+		for (const [cellId, bounds] of this.cellBounds) {
+			if (
+				r >= bounds.rowStart &&
+				r < bounds.rowEnd &&
+				c >= bounds.colStart &&
+				c < bounds.colEnd
+			) {
+				return cellId;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Route a scroll delta to a widget by cellId.
+	 * @param cellId - cell ID in the form "rowId:colId"
+	 * @param direction - +1 for scroll down (show later content), -1 for scroll up (show earlier content)
+	 */
+	scrollCell(cellId: string, direction: number): void {
+		const widget = this.widgets.get(cellId);
+		if (widget?.scrollBy) {
+			widget.scrollBy(direction);
+		}
 	}
 
 	private getWidget(

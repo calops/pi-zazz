@@ -11,6 +11,7 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { GridComponent } from "./grid/grid-component.ts";
+import { MouseManager } from "./mouse/mouse-manager.ts";
 import { DEFAULT_GRID } from "./default-config.ts";
 import type { GridConfig } from "./grid/types.ts";
 import { initializePalette } from "./terminal-palette.ts";
@@ -277,7 +278,7 @@ export default function (pi: ExtensionAPI) {
 
 		// We never call close() — the overlay stays for the entire session
 		void ui.custom(
-			(tui, theme, keybindings, _close) => {
+			(tui, theme, keybindings, close) => {
 				// Provide TUI/Theme to the widget capturer so it can lazily
 				// create captured widget components when they're first rendered.
 				setContext(tui as never, theme as never);
@@ -340,6 +341,25 @@ export default function (pi: ExtensionAPI) {
 				// We patch those methods on the specific Container instance so captured
 				// selectors appear centered on top of everything via tui.showOverlay().
 				const tu = tui as unknown as TUI;
+
+				// ── Mouse support ──────────────────────────────────────────────
+				const mouseManager = new MouseManager(
+					{ write: (data: string) => process.stdout.write(data) },
+					grid,
+				);
+				const disableMouse = mouseManager.enable();
+				const removeMouseListener = tu.addInputListener(
+					mouseManager.getInputListener(),
+				);
+
+				// Wrap close to disable mouse tracking on overlay removal
+				const origClose = close;
+				close = (result?: unknown) => {
+					disableMouse();
+					removeMouseListener();
+					origClose?.(result);
+				};
+
 				const editorContainer = tu.children.find(
 					(c): c is Container =>
 						c instanceof Container && c.children.includes(stubEditorRef!),
