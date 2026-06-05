@@ -19,11 +19,16 @@ import { initializePalette } from "./terminal-palette.ts";
 import "./widgets/custom-editor-widget.ts";
 import "./widgets/status-bar-widget.ts";
 import "./widgets/lens-widget.ts";
+import "./widgets/task-list-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
 
 // Subscribe to pi-lens events from the shared event bus so our lens
 // widget receives diagnostics data regardless of widget factory timing.
 import { subscribeToLensEvents } from "./lens-data-bridge.ts";
+
+// Subscribe to task tool execution events to track task state for the
+// grid's task-list widget.
+import { subscribeToTaskEvents } from "./task-data-bridge.ts";
 
 // Captured by setFooter callback for reading extension statuses.
 // Lazy: populated during TUI render (first callback invocation).
@@ -226,6 +231,10 @@ export default function (pi: ExtensionAPI) {
 	// populated regardless of widget creation timing.
 	subscribeToLensEvents(pi.events);
 
+	// Subscribe to task tool execution events at the extension level
+	// so the task data bridge tracks task state for the grid widget.
+	subscribeToTaskEvents(pi as never);
+
 	// --- Session lifecycle ---
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
@@ -419,7 +428,8 @@ export default function (pi: ExtensionAPI) {
 			const origSetWidget = plUi.setWidget?.bind(plUi);
 			if (origSetWidget) {
 				plUi.setWidget = (key, content) => {
-					if (key === "pi-lens") return; // suppress
+					if (key === "pi-lens") return; // suppress pi-lens
+					if (key === "tasks") return; // suppress @tintinweb/pi-tasks widget
 					origSetWidget(key, content);
 				};
 			}

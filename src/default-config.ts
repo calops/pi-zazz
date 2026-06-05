@@ -5,6 +5,25 @@ export const DEFAULT_GRID: GridConfig = {
 	minHeight: 8,
 	rows: [
 		{
+			id: "lints",
+			height: { min: 0, max: 12 },
+			columns: [
+				{
+					id: "lens",
+					width: { fraction: 1 },
+					scrollable: true,
+					widget: { type: "pi-lens", config: { maxDiagnostics: 20 } },
+				},
+				{
+					id: "tasks",
+					width: { fraction: 1 },
+					border: { char: "│", color: "border" },
+					scrollable: true,
+					widget: { type: "tasks", config: {} },
+				},
+			],
+		},
+		{
 			id: "status-bar",
 			height: { min: 1, max: 1 },
 			columns: [
@@ -34,12 +53,6 @@ export const DEFAULT_GRID: GridConfig = {
 					id: "editor",
 					width: { fraction: 1, min: 20 },
 					widget: { type: "editor", config: {} },
-				},
-				{
-					id: "lens",
-					width: { fraction: 1, min: 0 },
-					scrollable: true,
-					widget: { type: "pi-lens", config: { maxDiagnostics: 20 } },
 				},
 			],
 		},
