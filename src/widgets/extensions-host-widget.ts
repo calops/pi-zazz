@@ -69,17 +69,6 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 			// Get active widgets
 			const activeKeys = getActiveKeys(minWidgetWidth);
 
-			// Diagnostic: show captured state
-			const dbg = getDebugState();
-			if (dbg && dbg.length > 0) {
-				const debugLine = dim(` capt: ${dbg}`);
-				// Still render normally if there are active widgets
-				if (activeKeys.length === 0) {
-					lastRenderHadContent = true;
-					return [debugLine];
-				}
-			}
-
 			// ── Compute layout ─────────────────────────────────────────────
 			const columns = Math.max(
 				1,
@@ -150,6 +139,14 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 			}
 
 			lastRenderHadContent = allLines.length > 0;
+
+			// Append diagnostics so we can see what's captured
+			// TODO: remove after confirming pi-lens capture works
+			const dbg = getDebugState();
+			if (dbg) {
+				allLines.push(dim(` ${dbg}`));
+			}
+
 			return allLines;
 		},
 
