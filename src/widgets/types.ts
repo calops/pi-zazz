@@ -14,6 +14,19 @@ export interface WidgetDeps {
 	/** Autocomplete provider chain, captured from pi at startup */
 	autocompleteProvider?: unknown;
 
+	/** Reference to the grid for coordinate-based hit-testing and scroll routing */
+	gridRef?: {
+		hitTest(row: number, col: number): string | null;
+		scrollCell(cellId: string, direction: number): void;
+		cellBounds: Map<string, {
+			rowStart: number;
+			rowEnd: number;
+			colStart: number;
+			colEnd: number;
+			scrollable: boolean;
+		}>;
+	};
+
 	/**
 	 * Extension statuses captured from pi's footer data provider.
 	 * Provides read-only access to statuses set via ctx.ui.setStatus()
@@ -70,6 +83,25 @@ export interface WidgetInstance {
 	 * Called by pi after successful submission.
 	 */
 	addToHistory?(text: string): void;
+
+	/**
+	 * Scroll the widget content by `delta` lines.
+	 * Positive = scroll down (content moves up), negative = scroll up.
+	 * No-op for non-scrollable widgets.
+	 */
+	scrollBy?(delta: number): void;
+
+	/**
+	 * Current scroll offset in lines from the top. 0 = top.
+	 */
+	getScrollOffset?(): number;
+
+	/**
+	 * Total content lines this widget would render if unbounded.
+	 * Used by the grid to determine overflow and position the scrollbar.
+	 * Returns 0 if unknown or no overflow.
+	 */
+	getContentHeight?(): number;
 }
 
 /** Factory function that creates a widget instance */
