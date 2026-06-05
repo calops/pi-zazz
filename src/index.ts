@@ -164,11 +164,7 @@ class RoundedBorderWrapper implements Component {
 		// Strip the built-in DynamicBorder top/bottom lines (first & last).
 		// All built-in selectors/dialogs follow this pattern.
 		const body =
-			inner.length > 2
-				? inner.slice(1, -1)
-				: inner.length === 1
-					? []
-					: [];
+			inner.length > 2 ? inner.slice(1, -1) : inner.length === 1 ? [] : [];
 
 		const top = "╭" + "─".repeat(Math.max(0, width - 2)) + "╮";
 		const bottom = "╰" + "─".repeat(Math.max(0, width - 2)) + "╯";
@@ -357,17 +353,17 @@ export default function (pi: ExtensionAPI) {
 							origAddChild(component);
 							return;
 						}
-					selectorOverlayHandle?.hide();
-					selectorOverlayHandle = tu.showOverlay(
-						new RoundedBorderWrapper(component),
-						{
-							anchor: "center",
-							nonCapturing: false,
-							width: "80%",
-							maxHeight: "60%",
-							margin: { top: 1, bottom: 1, left: 2, right: 2 },
-						},
-					);
+						selectorOverlayHandle?.hide();
+						selectorOverlayHandle = tu.showOverlay(
+							new RoundedBorderWrapper(component),
+							{
+								anchor: "center",
+								nonCapturing: false,
+								width: "80%",
+								maxHeight: "60%",
+								margin: { top: 1, bottom: 1, left: 2, right: 2 },
+							},
+						);
 					};
 
 					const origClear = editorContainer.clear.bind(editorContainer);
