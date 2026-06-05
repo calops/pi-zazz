@@ -1,7 +1,14 @@
 import {
 	CustomEditor,
 	type ExtensionAPI,
+	type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
+import {
+	Container,
+	type OverlayHandle,
+	type Component,
+	type TUI,
+} from "@earendil-works/pi-tui";
 import { GridComponent } from "./grid/grid-component.ts";
 import { DEFAULT_GRID } from "./default-config.ts";
 import type { GridConfig } from "./grid/types.ts";
@@ -63,6 +70,18 @@ let stubEditorRef: StubEditor | null = null;
  * by this class (which extends CustomEditor and inherits its actionHandlers).
  */
 class StubEditor extends CustomEditor {
+	private _keybindings: KeybindingsManager;
+
+	constructor(
+		tui: ConstructorParameters<typeof CustomEditor>[0],
+		theme: ConstructorParameters<typeof CustomEditor>[1],
+		keybindings: KeybindingsManager,
+		options?: ConstructorParameters<typeof CustomEditor>[3],
+	) {
+		super(tui, theme, keybindings, options);
+		this._keybindings = keybindings;
+	}
+
 	override render(_width: number): string[] {
 		return new Array(reservedEditorHeight).fill("");
 	}
@@ -75,11 +94,11 @@ class StubEditor extends CustomEditor {
 		// but without the fallthrough to Editor.handleInput for text processing,
 		// which is handled by the grid widget).
 		if (this.onExtensionShortcut?.(data)) return;
-		if (this.keybindings?.matches(data, "app.clipboard.pasteImage")) {
+		if (this._keybindings?.matches(data, "app.clipboard.pasteImage")) {
 			this.onPasteImage?.();
 			return;
 		}
-		if (this.keybindings?.matches(data, "app.interrupt")) {
+		if (this._keybindings?.matches(data, "app.interrupt")) {
 			if (!this.isShowingAutocomplete()) {
 				const handler =
 					this.onEscape ?? this.actionHandlers.get("app.interrupt");
@@ -90,7 +109,7 @@ class StubEditor extends CustomEditor {
 			super.handleInput(data);
 			return;
 		}
-		if (this.keybindings?.matches(data, "app.exit")) {
+		if (this._keybindings?.matches(data, "app.exit")) {
 			if (editorBridge.getText().length === 0) {
 				const handler = this.onCtrlD ?? this.actionHandlers.get("app.exit");
 				handler?.();
@@ -102,7 +121,7 @@ class StubEditor extends CustomEditor {
 			if (
 				action !== "app.interrupt" &&
 				action !== "app.exit" &&
-				this.keybindings?.matches(data, action)
+				this._keybindings?.matches(data, action)
 			) {
 				handler();
 				return;
@@ -265,6 +284,47 @@ export default function (pi: ExtensionAPI) {
 				// stub editor reserves space even before the first render.
 				const estimatedLines = grid.render(80);
 				updateReservedHeight(estimatedLines.length);
+
+				// ── Intercept inline selectors/dialogs and show them as TUI ──
+				// overlays above the grid. All selectors (/model, /settings, etc.)
+				// render by clearing editorContainer and addChild-ing the component.
+				// We patch those methods on the specific Container instance so captured
+				// selectors appear centered on top of everything via tui.showOverlay().
+				const tu = tui as unknown as TUI;
+				const editorContainer = tu.children.find(
+					(c): c is Container =>
+						c instanceof Container && c.children.includes(stubEditorRef!),
+				);
+				if (editorContainer) {
+					let selectorOverlayHandle: OverlayHandle | null = null;
+
+					const origAddChild = editorContainer.addChild.bind(editorContainer);
+					editorContainer.addChild = (component: Component) => {
+						// Only forward the editor to the inline container — all other
+						// components (selectors, dialogs, inputs) are shown as TUI overlay
+						// exclusively, so the inline editor container stays empty during
+						// their lifetime and no duplicate rendering occurs.
+						if (component === stubEditorRef) {
+							origAddChild(component);
+							return;
+						}
+						selectorOverlayHandle?.hide();
+						selectorOverlayHandle = tu.showOverlay(component, {
+							anchor: "center",
+							nonCapturing: false,
+							width: "80%",
+							maxHeight: "60%",
+							margin: { top: 1, bottom: 1, left: 2, right: 2 },
+						});
+					};
+
+					const origClear = editorContainer.clear.bind(editorContainer);
+					editorContainer.clear = () => {
+						selectorOverlayHandle?.hide();
+						selectorOverlayHandle = null;
+						origClear();
+					};
+				}
 
 				return {
 					render: (width: number): string[] => {
