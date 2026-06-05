@@ -8,6 +8,7 @@ import {
 	type OverlayHandle,
 	type Component,
 	type TUI,
+	visibleWidth,
 } from "@earendil-works/pi-tui";
 import { GridComponent } from "./grid/grid-component.ts";
 import { DEFAULT_GRID } from "./default-config.ts";
@@ -141,6 +142,54 @@ class StubEditor extends CustomEditor {
 
 	override addToHistory(text: string): void {
 		editorBridge.addToHistory?.(text);
+	}
+}
+
+/**
+ * Wraps a component in a rounded border box (╭─╮/╰─╯) and strips the
+ * built-in DynamicBorder top/bottom lines from the inner component.
+ * Used for floating selector/dialog overlays.
+ */
+class RoundedBorderWrapper implements Component {
+	private child: Component;
+
+	constructor(child: Component) {
+		this.child = child;
+	}
+
+	render(width: number): string[] {
+		const innerWidth = Math.max(1, width - 2);
+		const inner = this.child.render(innerWidth);
+
+		// Strip the built-in DynamicBorder top/bottom lines (first & last).
+		// All built-in selectors/dialogs follow this pattern.
+		const body =
+			inner.length > 2
+				? inner.slice(1, -1)
+				: inner.length === 1
+					? []
+					: [];
+
+		const top = "╭" + "─".repeat(Math.max(0, width - 2)) + "╮";
+		const bottom = "╰" + "─".repeat(Math.max(0, width - 2)) + "╯";
+
+		const bordered = body.map((line) => {
+			const vw = visibleWidth(line);
+			if (vw <= innerWidth) {
+				return "│" + line + " ".repeat(innerWidth - vw) + "│";
+			}
+			return "│" + line + "│";
+		});
+
+		return [top, ...bordered, bottom];
+	}
+
+	handleInput(data: string): void {
+		this.child.handleInput?.(data);
+	}
+
+	invalidate(): void {
+		this.child.invalidate();
 	}
 }
 
@@ -308,14 +357,17 @@ export default function (pi: ExtensionAPI) {
 							origAddChild(component);
 							return;
 						}
-						selectorOverlayHandle?.hide();
-						selectorOverlayHandle = tu.showOverlay(component, {
+					selectorOverlayHandle?.hide();
+					selectorOverlayHandle = tu.showOverlay(
+						new RoundedBorderWrapper(component),
+						{
 							anchor: "center",
 							nonCapturing: false,
 							width: "80%",
 							maxHeight: "60%",
 							margin: { top: 1, bottom: 1, left: 2, right: 2 },
-						});
+						},
+					);
 					};
 
 					const origClear = editorContainer.clear.bind(editorContainer);
