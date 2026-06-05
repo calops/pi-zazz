@@ -17,6 +17,7 @@ import {
 	renderWidget,
 	hasContent,
 	setOnChange,
+	getDebugState,
 } from "../widget-capturer.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -63,13 +64,20 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 		render(width: number, height: number): string[] {
 			const w = Math.max(1, width);
 			const borderColorFn = deps.theme.fg.bind(deps.theme, "border");
+			const dim = deps.theme.fg.bind(deps.theme, "dim");
 
 			// Get active widgets
 			const activeKeys = getActiveKeys(minWidgetWidth);
 
-			if (activeKeys.length === 0) {
-				lastRenderHadContent = false;
-				return [];
+			// Diagnostic: show captured state
+			const dbg = getDebugState();
+			if (dbg && dbg.length > 0) {
+				const debugLine = dim(` capt: ${dbg}`);
+				// Still render normally if there are active widgets
+				if (activeKeys.length === 0) {
+					lastRenderHadContent = true;
+					return [debugLine];
+				}
 			}
 
 			// ── Compute layout ─────────────────────────────────────────────
