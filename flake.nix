@@ -30,6 +30,7 @@
               pkgs.typescript-language-server
               pkgs.prettier
               pkgs.biome
+              pkgs.ast-grep
             ];
 
             shellHook = ''
@@ -38,6 +39,19 @@
               echo "  Node $(node --version)"
               echo "  TypeScript $(tsc --version 2>/dev/null || echo 'not installed')"
               echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+              # Install project dependencies (including @types/node and peer deps)
+              # so TypeScript can resolve type declarations. This is a no-op if
+              # node_modules already exists and is up-to-date.
+              if [ -f package-lock.json ]; then
+                npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts 2>/dev/null || true
+              else
+                npm install --ignore-scripts 2>/dev/null || true
+              fi
+
+              # Add project-local binaries to PATH, but *after* the existing PATH
+              # so globally installed tools (like the user's own pi) take precedence.
+              export PATH="$PATH:$PWD/node_modules/.bin"
             '';
           };
         };

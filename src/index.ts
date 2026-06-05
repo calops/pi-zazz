@@ -5,12 +5,23 @@ import {
 import { GridComponent } from "./grid/grid-component.ts";
 import { DEFAULT_GRID } from "./default-config.ts";
 import type { GridConfig } from "./grid/types.ts";
+import { initializePalette } from "./terminal-palette.ts";
 
 // Side-effect imports: register built-in widgets
 import "./widgets/custom-editor-widget.ts";
 import "./widgets/status-bar-widget.ts";
 import "./widgets/lens-widget.ts";
 import "./widgets/prompt-bar-widget.ts";
+
+// Subscribe to pi-lens events from the shared event bus so our lens
+// widget receives diagnostics data regardless of widget factory timing.
+import { subscribeToLensEvents } from "./lens-data-bridge.ts";
+
+// Captured by setFooter callback for reading extension statuses.
+// Lazy: populated during TUI render (first callback invocation).
+let footerDataRef: {
+	getExtensionStatuses(): ReadonlyMap<string, string>;
+} | null = null;
 
 /**
  * Reserves vertical space equal to the grid height in pi's normal TUI layout.
@@ -29,11 +40,13 @@ const editorBridge: {
 	onSubmit: ((text: string) => void) | null;
 	getText: () => string;
 	setText: (text: string) => void;
+	addToHistory: ((text: string) => void) | null;
 } = {
 	handleInput: null,
 	onSubmit: null,
 	getText: () => "",
 	setText: () => {},
+	addToHistory: null,
 };
 
 /** Holds a reference to the StubEditor so editorBridge can reach its onSubmit. */
@@ -106,6 +119,10 @@ class StubEditor extends CustomEditor {
 	override setText(text: string): void {
 		editorBridge.setText(text);
 	}
+
+	override addToHistory(text: string): void {
+		editorBridge.addToHistory?.(text);
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -140,16 +157,29 @@ export default function (pi: ExtensionAPI) {
 
 	let requestRenderFn: (() => void) | null = null;
 
+	// Subscribe to pi-lens diagnostics events at the extension level
+	// (outside the widget factory) so the shared data bridge is always
+	// populated regardless of widget creation timing.
+	subscribeToLensEvents(pi.events);
+
 	// --- Session lifecycle ---
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 
+		// Query terminal color palette before building the overlay
+		// (falls back to hardcoded values if the terminal doesn't support OSC 4)
+		await initializePalette();
+
 		// Hide built-in UI — our overlay replaces everything below the message area
 		try {
-			ctx.ui.setWorkingVisible?.(false);
-			ctx.ui.setFooter?.(
-				() => ({ render: () => [], invalidate: () => {} }) as never,
-			);
+			// Capture extension statuses from the footer data provider. The factory
+			// runs once during the first TUI render cycle, populating footerDataRef.
+			ctx.ui.setFooter?.((_tui, _theme, footerData) => {
+				footerDataRef = footerData as {
+					getExtensionStatuses(): ReadonlyMap<string, string>;
+				};
+				return { render: () => [], invalidate: () => {} };
+			});
 			// Replace the built-in editor with a stub that reserves space
 			// equal to the grid height. The overlay updates reservedEditorHeight
 			// each render so messages stop exactly above the grid.
@@ -197,6 +227,12 @@ export default function (pi: ExtensionAPI) {
 					submitFn: (text: string) =>
 						stubEditorRef?.onSubmit?.(text) ?? pi.sendUserMessage(text),
 				};
+				// Lazy getter — footerDataRef is populated by the setFooter callback
+				// during the first TUI render cycle, after the factory below runs.
+				Object.defineProperty(deps, "footerData", {
+					get: () => footerDataRef,
+					enumerable: true,
+				});
 
 				const grid = new GridComponent(
 					tui as never,
@@ -220,6 +256,7 @@ export default function (pi: ExtensionAPI) {
 				editorBridge.handleInput = (data) => grid.handleInput(data);
 				editorBridge.getText = () => grid.getText();
 				editorBridge.setText = (text) => grid.setText(text);
+				editorBridge.addToHistory = (text) => grid.addToHistory(text);
 				// Forward submit through StubEditor so slash commands (/model, /settings,
 				// etc.) are processed by pi's command handler before sending the message.
 				editorBridge.onSubmit = (text) => stubEditorRef?.onSubmit?.(text);
@@ -261,6 +298,24 @@ export default function (pi: ExtensionAPI) {
 				},
 			},
 		);
+		// Suppress pi-lens native widget by intercepting setWidget calls.
+		// This is more reliable than clearing after the fact — pi-lens's
+		// session_start may run after ours regardless of extension load order.
+		{
+			const plUi = ctx.ui as unknown as {
+				setWidget?: (
+					key: string,
+					content: undefined | ((tui: unknown, theme: unknown) => unknown),
+				) => void;
+			};
+			const origSetWidget = plUi.setWidget?.bind(plUi);
+			if (origSetWidget) {
+				plUi.setWidget = (key, content) => {
+					if (key === "pi-lens") return; // suppress
+					origSetWidget(key, content);
+				};
+			}
+		}
 	});
 
 	// --- Event wiring for reactive updates ---

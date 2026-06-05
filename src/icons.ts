@@ -16,9 +16,9 @@ export const ICONS = {
 	// Git
 	branch: "\u{F126}", // nf-fa-code_fork 
 	git: "\u{F1D3}", // nf-fa-git 
-	staged: "\u{F4D2}", // nf-oct-diff 
-	unstaged: "\u{F4D6}", // nf-oct-diff 
-	untracked: "\u{F4D0}", // nf-oct-diff 
+	staged: "\u{F1A99}", // md-file_document_check 󱪙 — doc with checkmark
+	unstaged: "\u{F11E8}", // md-file_edit_outline 󱇨 — doc with pencil
+	untracked: "\u{F0EED}", // md-file_plus_outline 󰻭 — doc with plus
 
 	// Thinking / cognition
 	thinking: "\u{F192}", // nf-fa-circle 
@@ -54,6 +54,7 @@ export const ICONS = {
 	cacheWrite: "\u{DB80}\u{DC54}", // same as tokensOut
 
 	// Navigation
+	promptArrow: "\u{F054}", // nf-fa-chevron_right 
 	prevPrompt: "\u{F053}", // nf-fa-chevron_left 
 
 	// LSP / language

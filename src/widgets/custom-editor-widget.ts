@@ -13,6 +13,7 @@ import type {
 	AutocompleteItem,
 	AutocompleteProvider,
 } from "@earendil-works/pi-tui";
+import { icon } from "../icons.ts";
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory, WidgetInstance } from "./types.ts";
 import type { GridCellInfo } from "../grid/types.ts";
@@ -111,6 +112,8 @@ class OverlayEditor extends Editor {
 	private completionComponent: CompletionOverlayComponent | null = null;
 	private cell: GridCellInfo | null = null;
 	private deps: WidgetDeps | null = null;
+	/** Whether to render a rounded border around the editor */
+	borderEnabled = false;
 
 	constructor(tui: TUI, theme: EditorTheme, options?: EditorOptions) {
 		super(tui, theme, options);
@@ -160,11 +163,68 @@ class OverlayEditor extends Editor {
 	}
 
 	override render(width: number): string[] {
-		const lines = super.render(width);
+		if (!this.borderEnabled) {
+			// Simple mode: no border, just arrow prefix
+			const arrowW = 2;
+			const contentWidth = Math.max(1, width - arrowW);
+
+			const lines = super.render(contentWidth);
+			if (lines.length <= 2) return [];
+
+			const content = lines.slice(1, -1);
+
+			if (content.length > 0 && content[0]) {
+				const arrow =
+					this.deps?.theme?.fg?.("muted", icon("promptArrow") + " ") ??
+					`\x1b[2m${icon("promptArrow")} \x1b[22m`;
+				content[0] = arrow + content[0];
+			}
+
+			return content;
+		}
+
+		// Bordered mode: rounded border around the editor
+		// 2 chars left ("│ ") + 2 chars right (" │") = 4 total for borders
+		const borderInner = Math.max(1, width - 4);
+		// Arrow prefix inside the border
+		const contentWidth = Math.max(1, width - 6);
+
+		const lines = super.render(contentWidth);
 		if (lines.length <= 2) return [];
-		// Strip top and bottom horizontal bars (inherited from pi-tui's Editor);
-		// the completion popup is rendered as a separate overlay, not inline.
-		return lines.slice(1, -1);
+
+		const editorContent = lines.slice(1, -1);
+
+		// Border color: green for bash, theme border otherwise
+		const isBash = this.getText().startsWith("!");
+		const sty = (text: string) =>
+			isBash
+				? (this.deps?.theme?.fg?.("success", text) ??
+					`\x1b[38;5;2m${text}\x1b[0m`)
+				: (this.deps?.theme?.fg?.("border", text) ?? text);
+
+		// Arrow indicator for the first line (muted)
+		const arrow =
+			this.deps?.theme?.fg?.("muted", icon("promptArrow") + " ") ??
+			`\x1b[2m${icon("promptArrow")} \x1b[22m`;
+
+		const result: string[] = [];
+
+		// Top border: ╭────╮
+		result.push(sty(`╭`) + sty(`─`.repeat(borderInner)) + sty(`╮`));
+
+		// Content lines
+		for (let i = 0; i < editorContent.length; i++) {
+			let line = editorContent[i]!.trimEnd();
+			if (i === 0) line = arrow + line;
+			const vw = visibleWidth(line);
+			const pad = Math.max(0, borderInner - vw);
+			result.push(sty("│ ") + line + " ".repeat(pad) + sty(" │"));
+		}
+
+		// Bottom border: ╰────╯
+		result.push(sty(`╰`) + sty(`─`.repeat(borderInner)) + sty(`╯`));
+
+		return result;
 	}
 
 	setup(
@@ -246,9 +306,10 @@ class OverlayEditor extends Editor {
 
 export const customEditorWidgetFactory: WidgetFactory = (
 	deps: WidgetDeps,
-	_config: unknown,
+	config: unknown,
 	cell: GridCellInfo,
 ) => {
+	const widgetConfig = (config ?? {}) as { border?: boolean };
 	const tui = deps.tui as unknown as TUI;
 	const provider = deps.autocompleteProvider as
 		| AutocompleteProvider
@@ -271,6 +332,8 @@ export const customEditorWidgetFactory: WidgetFactory = (
 	});
 
 	if (provider) editor.setup(cell, deps, provider);
+
+	editor.borderEnabled = widgetConfig.border ?? false;
 
 	editor.onSubmit = (text: string) => submitFn(text);
 
@@ -297,6 +360,10 @@ export const customEditorWidgetFactory: WidgetFactory = (
 		},
 
 		configure(_cfg: Record<string, unknown>): void {},
+
+		addToHistory(text: string): void {
+			editor.addToHistory(text);
+		},
 	};
 
 	return instance;

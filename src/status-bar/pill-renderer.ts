@@ -50,8 +50,18 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-// Window background (Catppuccin Mocha base #1e1e2e)
-const BG_RGB: [number, number, number] = [30, 30, 46];
+// Window background — updated dynamically from terminal palette.
+let BG_RGB: [number, number, number] = [30, 30, 46];
+
+/** Override the terminal background RGB used by blendTowardBg. */
+export function setBgRgb(r: number, g: number, b: number): void {
+	BG_RGB = [r, g, b];
+}
+
+/** Read the current terminal background RGB. */
+export function getBgRgb(): [number, number, number] {
+	return BG_RGB;
+}
 
 /**
  * Blend a color toward the window background using linear RGB interpolation
@@ -129,7 +139,7 @@ function cubeLevelRgb(idx: number): [number, number, number] {
 /** Build a PillExtension from raw text and the main pill's base 256-color bg. */
 export function makeExtension(text: string, baseBg: number): PillExtension {
 	const [r, g, b] = cubeLevelRgb(baseBg);
-	const [dr, dg, db] = blendTowardBg(r, g, b);
+	const [dr, dg, db] = blendTowardBg(r, g, b, 0.2);
 	return {
 		text,
 		width: visibleWidth(text),

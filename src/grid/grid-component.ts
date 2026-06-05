@@ -3,7 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { WidgetDeps, WidgetInstance } from "../widgets/types.ts";
 import { createFromConfig } from "../widgets/registry.ts";
 import { computeLayout } from "./grid-engine.ts";
-import type { GridConfig, GridCellInfo } from "./types.ts";
+import type { GridConfig, GridCellInfo, ColumnLayout } from "./types.ts";
 
 /**
  * GridComponent is a pure renderer for the grid layout.
@@ -28,9 +28,7 @@ export class GridComponent {
 		this.config = config;
 		this.deps = deps;
 		this.borderColorFn = deps.theme.fg.bind(deps.theme, "border");
-		// Store tui for requestRender
 		(deps as unknown as Record<string, unknown>).tui = tui;
-		// Store grid ref so editor widget can sync text on submit
 		(deps as unknown as Record<string, unknown>).gridRef = this;
 	}
 
@@ -58,43 +56,100 @@ export class GridComponent {
 					terminalRow += perColHeight;
 				}
 			} else {
-				let maxCellHeight = 0;
-				const cellLines: string[][] = [];
+				// ── Determine visible columns ──────────────────────────────────
+				// Check each widget's heightConstraint — if max === 0, hide it
+				const rowCfg = this.config.rows.find((r) => r.id === row.id);
+				const colCfgs = rowCfg?.columns ?? [];
+
+				const visibleIndices: number[] = [];
 				for (let ci = 0; ci < row.columns.length; ci++) {
 					const col = row.columns[ci]!;
-					const borderOffset = col.borderLeft ? 1 : 0;
+					const widget = this.getWidget(col.id, row.id, ci, terminalRow, 0);
+					const hc = widget.heightConstraint?.();
+					if (hc && hc.max === 0) continue;
+					visibleIndices.push(ci);
+				}
+
+				// ── Redistribute width among visible columns ───────────────────
+				const redistributed: Array<{ layout: ColumnLayout; width: number }> =
+					[];
+				if (visibleIndices.length === 1) {
+					const col = row.columns[visibleIndices[0]!]!;
+					redistributed.push({
+						layout: col,
+						width: Math.max(1, width - (col.borderLeft ? 1 : 0)),
+					});
+				} else if (visibleIndices.length > 1) {
+					const totalFractions = visibleIndices.reduce(
+						(s, ci) => s + (colCfgs[ci]?.width.fraction ?? 1),
+						0,
+					);
+					const effectiveTotal =
+						totalFractions > 0 ? totalFractions : visibleIndices.length;
+					const mins = visibleIndices.map((ci) => colCfgs[ci]?.width.min ?? 1);
+					const totalMins = mins.reduce((s, m) => s + m, 0);
+					const distributable = Math.max(0, width - totalMins);
+
+					let used = 0;
+					for (let i = 0; i < visibleIndices.length; i++) {
+						const ci = visibleIndices[i]!;
+						const col = row.columns[ci]!;
+						const cfg = colCfgs[ci];
+						const fraction = cfg?.width.fraction ?? 1;
+						const min = cfg?.width.min ?? 1;
+						let w =
+							min + Math.floor((distributable * fraction) / effectiveTotal);
+						if (cfg?.width.max !== undefined) {
+							w = Math.min(w, cfg.width.max);
+						}
+						redistributed.push({ layout: col, width: w });
+						used += w;
+					}
+					// Distribute any leftover space
+					for (let i = 0; i < redistributed.length && used < width; i++) {
+						const rw = redistributed[i]!;
+						const cfg = colCfgs[visibleIndices[i]!];
+						const max = cfg?.width.max ?? Number.POSITIVE_INFINITY;
+						const add = Math.min(width - used, max - rw.width);
+						redistributed[i] = { ...rw, width: rw.width + add };
+						used += add;
+					}
+				}
+
+				// ── Render visible columns ─────────────────────────────────────
+				let maxCellHeight = 0;
+				const cellLines: string[][] = [];
+				for (const { layout: col, width: w } of redistributed) {
 					const widget = this.getWidget(
 						col.id,
 						row.id,
-						ci,
+						row.columns.findIndex((c) => c.id === col.id),
 						terminalRow,
-						borderOffset,
+						0,
 					);
-					const lines = widget.render(col.width, row.height);
+					const lines = widget.render(w, row.maxHeight);
 					cellLines.push(lines);
 					maxCellHeight = Math.max(maxCellHeight, lines.length);
 				}
-				// Row height is driven by actual widget content, not a pre-allocated budget.
-				// Clamp the tallest cell to the row's [min, max] so the row grows and
-				// shrinks with its content rather than filling leftover terminal space.
 				const effectiveHeight = Math.max(
 					row.minHeight,
 					Math.min(maxCellHeight, row.maxHeight),
 				);
 				for (let lineIdx = 0; lineIdx < effectiveHeight; lineIdx++) {
 					let composed = "";
-					for (let ci = 0; ci < row.columns.length; ci++) {
-						const col = row.columns[ci]!;
-						if (col.borderLeft) composed += this.borderColorFn("│");
-						const cellLine = cellLines[ci]![lineIdx] ?? "";
-						composed += this.clampLine(cellLine, col.width);
+					for (let vi = 0; vi < redistributed.length; vi++) {
+						const rw = redistributed[vi]!;
+						if (rw.layout.borderLeft) {
+							composed += this.borderColorFn("│");
+						}
+						const cellLine = cellLines[vi]![lineIdx] ?? "";
+						composed += this.clampLine(cellLine, rw.width);
 					}
 					allLines.push(this.clampLine(composed, width));
 				}
 				terminalRow += effectiveHeight;
 			}
 		}
-		// Store the grid's terminal offset so completion popups can position correctly
 		const tuiObj = this.deps.tui as unknown as TUI;
 		const gridTopRow = tuiObj.terminal.rows - allLines.length;
 		(this.deps as unknown as Record<string, unknown>).gridTopRow = gridTopRow;
@@ -107,23 +162,22 @@ export class GridComponent {
 		this.onInvalidate?.();
 	}
 
-	/**
-	 * Forward input to the editor widget.
-	 * Returns true if the editor widget consumed the input.
-	 */
 	handleInput(data: string): boolean {
 		const editorWidget = this.widgets.get("main:editor");
 		if (editorWidget?.handleInput?.(data)) return true;
 		return false;
 	}
 
-	/** Set the editor widget's text content */
+	addToHistory(text: string): void {
+		const editorWidget = this.widgets.get("main:editor");
+		editorWidget?.addToHistory?.(text);
+	}
+
 	setText(text: string): void {
 		const editorWidget = this.widgets.get("main:editor");
 		editorWidget?.setText?.(text);
 	}
 
-	/** Get the editor widget's current text content */
 	getText(): string {
 		const editorWidget = this.widgets.get("main:editor");
 		return editorWidget?.getText?.() ?? "";

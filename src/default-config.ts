@@ -32,28 +32,14 @@ export const DEFAULT_GRID: GridConfig = {
 			columns: [
 				{
 					id: "editor",
-					width: { fraction: 2, min: 20 },
+					width: { fraction: 1, min: 20 },
 					widget: { type: "editor", config: {} },
 				},
 				{
 					id: "lens",
-					width: { fraction: 1, min: 20 },
+					width: { fraction: 1, min: 0 },
 					scrollable: true,
 					widget: { type: "pi-lens", config: { maxDiagnostics: 20 } },
-				},
-			],
-		},
-		{
-			id: "prompt-bar",
-			height: { min: 1, max: 1 },
-			columns: [
-				{
-					id: "prompt",
-					width: {},
-					widget: {
-						type: "prompt-bar",
-						config: { maxLength: 120 },
-					},
 				},
 			],
 		},

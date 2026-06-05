@@ -3,6 +3,7 @@ import type { GridCellInfo } from "../grid/types.ts";
 /** Dependencies injected into every widget factory */
 export interface WidgetDeps {
 	pi: unknown;
+	ctx: unknown;
 	tui: { termWidth?: number; termHeight?: number; requestRender?: () => void };
 	theme: {
 		fg: (color: string, text: string) => string;
@@ -12,6 +13,16 @@ export interface WidgetDeps {
 	submitFn: (text: string) => void;
 	/** Autocomplete provider chain, captured from pi at startup */
 	autocompleteProvider?: unknown;
+
+	/**
+	 * Extension statuses captured from pi's footer data provider.
+	 * Provides read-only access to statuses set via ctx.ui.setStatus()
+	 * by other extensions (MCP status, LSP status, etc.).
+	 * Available after first TUI render cycle.
+	 */
+	footerData?: {
+		getExtensionStatuses(): ReadonlyMap<string, string>;
+	};
 }
 
 /** Interface every widget must implement */
@@ -53,6 +64,12 @@ export interface WidgetInstance {
 	 * Replaces the current buffer and resets cursor to end.
 	 */
 	setText?(text: string): void;
+
+	/**
+	 * Add a prompt to the editor's input history (for up/down arrow navigation).
+	 * Called by pi after successful submission.
+	 */
+	addToHistory?(text: string): void;
 }
 
 /** Factory function that creates a widget instance */

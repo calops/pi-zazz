@@ -1,6 +1,8 @@
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory } from "./types.ts";
+import { visibleWidth } from "@earendil-works/pi-tui";
 import {
+	type Pill,
 	makePill,
 	makeExtension,
 	packPills,
@@ -12,35 +14,29 @@ import {
 	type SegmentId,
 	type SegmentOptions,
 } from "../status-bar/segments.ts";
+import { getPalette } from "../terminal-palette.ts";
+import { setBgRgb } from "../status-bar/pill-renderer.ts";
 
-// Each pill has its own distinguishing background color. The foreground uses
-// color 0 (typical terminal default background) so text appears to be punched
-// through the pill rather than painted on top.
-const PILL_FG = "0";
+// ── Dynamic palette-backed color helpers ─────────────────────────────────────
 
-const SEGMENT_COLORS: Record<string, (t: string) => string> = {
-	model: (t) => `\x1b[48;5;39m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	thinking: (t) => `\x1b[48;5;99m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	shell_mode: (t) => `\x1b[48;5;33m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	path: (t) => `\x1b[48;5;71m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	git: (t) => `\x1b[48;5;178m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	context_pct: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	context_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	cost: (t) => `\x1b[48;5;130m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	token_in: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	token_out: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	token_total: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	cache_read: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	cache_write: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	time: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	time_spent: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	session: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	hostname: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-	extension_statuses: (t) => `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`,
-};
+let _pillFg = "0";
+let _segmentColors: Record<string, (t: string) => string> | null = null;
+let _neutralBgIndex = 238;
 
-function defaultColor(t: string): string {
-	return `\x1b[48;5;238m\x1b[38;5;${PILL_FG}m${t}\x1b[0m`;
+function ensureColors(): void {
+	if (_segmentColors) return;
+	const pal = getPalette();
+	_pillFg = String(pal.pillFg);
+	_neutralBgIndex = pal.neutralBg ?? 238;
+	// Keep blendTowardBg in sync with the actual terminal background
+	setBgRgb(pal.bgRgb[0], pal.bgRgb[1], pal.bgRgb[2]);
+
+	const fns: Record<string, (t: string) => string> = {};
+	for (const [seg, bg] of Object.entries(pal.segmentBg)) {
+		fns[seg] = (t: string) =>
+			`\x1b[48;5;${bg}m\x1b[38;5;${_pillFg}m${t}\x1b[0m`;
+	}
+	_segmentColors = fns;
 }
 
 export const statusBarWidgetFactory: WidgetFactory = (
@@ -184,7 +180,24 @@ export const statusBarWidgetFactory: WidgetFactory = (
 		},
 	);
 
+	/** Read extension statuses from the footer data provider and populate cache. */
+	function refreshExtensionStatuses(): void {
+		if (!deps.footerData) return;
+		try {
+			const statuses = deps.footerData.getExtensionStatuses();
+			cachedExtensionStatuses.clear();
+			for (const [key, value] of statuses) {
+				if (value && value.trim()) {
+					cachedExtensionStatuses.set(key, value);
+				}
+			}
+		} catch {
+			/* footer data provider not available yet */
+		}
+	}
+
 	function buildContext(): SegmentContext {
+		refreshExtensionStatuses();
 		return {
 			model: cachedModel,
 			thinkingLevel: cachedThinkingLevel,
@@ -214,6 +227,7 @@ export const statusBarWidgetFactory: WidgetFactory = (
 
 	return {
 		render(width: number, _height: number): string[] {
+			ensureColors();
 			const ctx = buildContext();
 
 			const makePillFromSegment = (segId: SegmentId) => {
@@ -221,7 +235,10 @@ export const statusBarWidgetFactory: WidgetFactory = (
 				if (!segFn) return null;
 				const result = segFn(ctx);
 				if (!result.visible) return null;
-				const colorFn = SEGMENT_COLORS[segId] ?? defaultColor;
+				const colorFn =
+					_segmentColors?.[segId] ??
+					((t: string) =>
+						`\x1b[48;5;${_neutralBgIndex}m\x1b[38;5;${_pillFg}m${t}\x1b[0m`);
 				const pill = makePill("", result.text, colorFn);
 				// Attach right extension if the segment provides one
 				if (result.rightExtension && pill.bg !== null) {
@@ -237,6 +254,18 @@ export const statusBarWidgetFactory: WidgetFactory = (
 			const rightPills = rightSegments
 				.map(makePillFromSegment)
 				.filter((p): p is NonNullable<typeof p> => p !== null);
+
+			// Append a pill for every extension status
+			// (right-aligned, behind configured rightSegments)
+			for (const [, value] of cachedExtensionStatuses) {
+				const pill: Pill = {
+					text: `\x1b[48;5;${_neutralBgIndex}m\x1b[38;5;${_pillFg}m${value}\x1b[0m`,
+					width: visibleWidth(value),
+					bg: _neutralBgIndex,
+					fg: parseInt(_pillFg, 10),
+				};
+				rightPills.push(pill);
+			}
 
 			const line = packPills(leftPills, rightPills, separator, width);
 			return [line];
