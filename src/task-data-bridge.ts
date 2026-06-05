@@ -233,6 +233,20 @@ function handleTaskUpdate(args: Record<string, unknown> | undefined): void {
 	if (args.metadata !== undefined) {
 		existing.metadata = args.metadata as Record<string, unknown>;
 	}
+	// Handle blocking relationships
+	if (args.addBlockedBy !== undefined) {
+		const newBlockedBy = args.addBlockedBy as string[];
+		for (const id of newBlockedBy) {
+			if (!existing.blockedBy.includes(id)) {
+				existing.blockedBy.push(id);
+			}
+		}
+	}
+	if (args.addBlocks !== undefined) {
+		// addBlocks sets that *this* task blocks others — we'd need to look up
+		// the blocked tasks and set their blockedBy. For now, we only handle
+		// addBlockedBy (the direction TaskUpdate uses for dependencies).
+	}
 	existing.updatedAt = Date.now();
 }
 
@@ -473,6 +487,7 @@ export function injectTestData(): void {
 		"Add task list integration",
 		"Integrate the task list into the grid widget",
 		"pending",
+		{ blockedBy: ["2"] },
 	);
 
 	testDataInjected = true;

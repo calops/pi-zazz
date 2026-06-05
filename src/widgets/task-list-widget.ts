@@ -24,6 +24,7 @@ import {
 	injectTestData,
 	type TaskInfo,
 } from "../task-data-bridge.ts";
+import { icon as getIcon } from "../icons.ts";
 
 // ── Spinner frames for active tasks (matches Claude Code style) ──────────────
 
@@ -209,7 +210,7 @@ function renderTaskLine(
 	// Blocked indicator
 	let blockedSuffix = "";
 	if (isPending && task.blockedBy.length > 0) {
-		blockedSuffix = theme.dim(" › blocked");
+		blockedSuffix = ` ${theme.dim(getIcon("locked"))}`;
 	}
 
 	const prefix = ` ${icon} ${idTag} `;

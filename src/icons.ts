@@ -42,6 +42,9 @@ export const ICONS = {
 	// Cost / money
 	cost: "\u{F155}", // nf-fa-money 
 
+	// Blocked / lock
+	locked: "\u{F023}", // nf-fa-lock 
+
 	// Session
 	session: "\u{DB80}\u{DF06}", // nf-md-identifier 󰌆
 

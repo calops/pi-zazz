@@ -43,19 +43,6 @@ let onChangeFn: (() => void) | null = null;
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
-/** Debug: show all captured keys and their content status. */
-export function getDebugState(): string {
-	const parts: string[] = [];
-	for (const [key, entry] of entries) {
-		if (entry.type === "factory") {
-			parts.push(`${key}(factory, hasContent=${entry.hasContent}, comp=${!!entry.component})`);
-		} else {
-			parts.push(`${key}(lines, hasContent=${entry.hasContent})`);
-		}
-	}
-	return parts.join(", ");
-}
-
 /** Provide the TUI and theme instances needed to create widget components. */
 export function setContext(tui: TUI, theme: Theme): void {
 	tuiRef = tui;

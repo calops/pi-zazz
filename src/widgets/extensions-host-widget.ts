@@ -17,7 +17,6 @@ import {
 	renderWidget,
 	hasContent,
 	setOnChange,
-	getDebugState,
 } from "../widget-capturer.ts";
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -64,7 +63,6 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 		render(width: number, height: number): string[] {
 			const w = Math.max(1, width);
 			const borderColorFn = deps.theme.fg.bind(deps.theme, "border");
-			const dim = deps.theme.fg.bind(deps.theme, "dim");
 
 			// Get active widgets
 			const activeKeys = getActiveKeys(minWidgetWidth);
@@ -139,14 +137,6 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 			}
 
 			lastRenderHadContent = allLines.length > 0;
-
-			// Append diagnostics so we can see what's captured
-			// TODO: remove after confirming pi-lens capture works
-			const dbg = getDebugState();
-			if (dbg) {
-				allLines.push(dim(` ${dbg}`));
-			}
-
 			return allLines;
 		},
 
