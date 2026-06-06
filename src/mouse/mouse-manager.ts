@@ -28,22 +28,22 @@ export type InputListener = (data: string) => InputListenerResult;
  * Manages SGR mouse tracking and routes scroll/click events to the grid.
  */
 export class MouseManager {
+	private _buttonTracking = false;
+
 	constructor(
 		private terminal: { write(data: string): void },
 		private grid: MouseGrid,
 	) {}
 
 	/**
-	 * Enable SGR mouse tracking.
+	 * Enable SGR extended coordinate encoding only.
 	 *
-	 * Writes the DECSET sequences for button-event tracking (1000) and
-	 * SGR extended coordinate encoding (1006), then returns a cleanup
-	 * function that calls disable().
+	 * Writes DECSET 1006 for precise SGR mouse encoding. Button-event
+	 * tracking (DECSET 1000) is not enabled here — call
+	 * {@link setButtonTracking} when overflow scroll is needed.
 	 */
 	enable(): () => void {
-		// 1000 = enable basic button-event tracking
-		// 1006 = enable SGR extended coordinates (precise col/row)
-		this.terminal.write("\x1b[?1000h\x1b[?1006h");
+		this.terminal.write("\x1b[?1006h");
 
 		return () => {
 			this.disable();
@@ -51,19 +51,51 @@ export class MouseManager {
 	}
 
 	/**
+	 * Enable or disable button-event tracking (DECSET 1000).
+	 *
+	 * Button tracking should be active only when a grid cell has
+	 * overflow content that needs scroll handling. When disabled,
+	 * scroll events pass through to the terminal for native scrolling.
+	 */
+	setButtonTracking(enabled: boolean): void {
+		if (enabled && !this._buttonTracking) {
+			this.terminal.write("\x1b[?1000h");
+			this._buttonTracking = true;
+		} else if (!enabled && this._buttonTracking) {
+			this.terminal.write("\x1b[?1000l");
+			this._buttonTracking = false;
+		}
+	}
+
+	/**
+	 * Returns whether button-event tracking is currently enabled.
+	 */
+	isButtonTracking(): boolean {
+		return this._buttonTracking;
+	}
+
+	/**
 	 * Disable SGR mouse tracking by writing the reset sequences.
 	 */
 	disable(): void {
 		this.terminal.write("\x1b[?1000l\x1b[?1006l");
+		this._buttonTracking = false;
 	}
 
 	/**
 	 * Return an input listener suitable for `TUI.addInputListener()`.
 	 *
-	 * - **Scroll events** (btn = 64 or 65): hit-test the cell at the
-	 *   reported (col, row) and route scrollCell with the correct
-	 *   direction (scroll-up → -1, scroll-down → +1).
-	 * - **Other mouse events**: consumed silently (return `{ consume: true }`).
+	 * Scroll events (btn = 64 or 65) will only arrive when button-event
+	 * tracking is active (via {@link setButtonTracking}), which happens
+	 * when an overflow grid cell needs scroll support. When hitTest
+	 * returns null (cursor over non-grid area), the event is still
+	 * consumed — the terminal already dispatched it to us and it cannot
+	 * be returned to native handling.
+	 *
+	 * - **Scroll events**: hit-test the cell at the reported (col, row)
+	 *   and route scrollCell with the correct direction (scroll-up → -1,
+	 *   scroll-down → +1).
+	 * - **Other mouse events**: consumed silently.
 	 * - **Non-mouse input**: returns `undefined` so the event passes through.
 	 */
 	getInputListener(): InputListener {

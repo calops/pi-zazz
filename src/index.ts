@@ -402,6 +402,12 @@ export default function (pi: ExtensionAPI) {
 					render: (width: number): string[] => {
 						const gridLines = grid.render(width);
 						updateReservedHeight(gridLines.length);
+						// Toggle mouse button capture: only capture when a
+						// scrollable cell has overflow, otherwise let scroll
+						// events pass through to the terminal natively.
+						mouseManager.setButtonTracking(
+							grid.hasScrollableOverflow(),
+						);
 						// Return only the grid lines. The overlay naturally
 						// covers just the bottom gridLines.length rows.
 						// Messages above are pi's normal TUI output — not

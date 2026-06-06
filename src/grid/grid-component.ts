@@ -321,6 +321,22 @@ export class GridComponent {
 		}
 	}
 
+	/**
+	 * Returns true if any scrollable cell has content that exceeds its viewport.
+	 * Used by the MouseManager to decide whether to enable button-event tracking.
+	 */
+	hasScrollableOverflow(): boolean {
+		for (const [cellId, bounds] of this.cellBounds) {
+			if (!bounds.scrollable) continue;
+			const widget = this.widgets.get(cellId);
+			if (!widget?.getContentHeight) continue;
+			const contentHeight = widget.getContentHeight();
+			const viewportHeight = bounds.rowEnd - bounds.rowStart;
+			if (contentHeight > viewportHeight) return true;
+		}
+		return false;
+	}
+
 	private getWidget(
 		colId: string,
 		rowId: string,
