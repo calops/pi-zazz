@@ -1,439 +1,253 @@
 /**
- * File-type icon mapping combining:
- * - lsd's comprehensive extension→codepoint mapping (icons)
- * - mini.nvim's highlight group→color mapping (colors)
+ * File-type icon mapping extracted from mini.nvim's icons module.
  *
- * lsd provides 342 extension-to-Nerd-Font-icon mappings.
- * mini.nvim provides 9 color categories (Azure, Blue, Cyan, Green,
- * Grey, Orange, Purple, Red, Yellow) mapped to file types.
+ * Source: https://github.com/echasnovski/mini.nvim/blob/main/lua/mini/icons.lua
  *
- * For extensions not explicitly in mini.nvim's color mapping,
- * we infer the color from the dominant file type category.
+ * mini.nvim provides both Nerd Font glyphs AND color categories for
+ * file types. This module combines:
+ * - filetype icons: 200+ filetype → {glyph, hl} entries
+ * - extension icons: direct extension → {glyph, hl} for tricky cases
+ * - An extension→filetype mapping to look up icons by file extension
  */
 
 // ── Highlight group → hex color ─────────────────────────────────────
-// Colors derived from mini.nvim's default links:
-//   MiniIconsAzure  → Function         → #589ED6
-//   MiniIconsBlue   → DiagnosticInfo   → #569CD6
-//   MiniIconsCyan   → DiagnosticHint   → #4EC9B0
-//   MiniIconsGreen  → DiagnosticOk     → #6A9955
-//   MiniIconsGrey   → (default)        → #808080
-//   MiniIconsOrange → DiagnosticWarn   → #CE9178
-//   MiniIconsPurple → Constant         → #C586C0
-//   MiniIconsRed    → DiagnosticError  → #F44747
-//   MiniIconsYellow → DiagnosticWarn   → #DCDCAA
+// Derived from mini.nvim's default highlight group links:
+//   Azure  → Function       → #589ED6
+//   Blue   → DiagnosticInfo → #569CD6
+//   Cyan   → DiagnosticHint → #4EC9B0
+//   Green  → DiagnosticOk   → #6A9955
+//   Grey   → (default)      → #808080
+//   Orange → DiagnosticWarn → #CE9178
+//   Purple → Constant       → #C586C0
+//   Red    → DiagnosticError→ #F44747
+//   Yellow → DiagnosticWarn → #DCDCAA
 
-const HL = {
-	Azure: "#589ED6",
-	Blue: "#569CD6",
-	Cyan: "#4EC9B0",
-	Green: "#6A9955",
-	Grey: "#808080",
-	Orange: "#CE9178",
-	Purple: "#C586C0",
-	Red: "#F44747",
-	Yellow: "#DCDCAA",
-} as const;
+const HL: Record<string, string> = {
+	A: "#589ED6", B: "#569CD6", C: "#4EC9B0",
+	G: "#6A9955", g: "#808080", O: "#CE9178",
+	P: "#C586C0", R: "#F44747", Y: "#DCDCAA",
+};
+type H = keyof typeof HL;
 
-type HlName = keyof typeof HL;
+// ── Filetype → [glyph, highlight] ───────────────────────────────────
+// From mini.nvim's H.filetype_icons.
+// Keys are Neovim filetype names. Some are also valid as file
+// extensions (like "nix", "rust", "toml", "yaml").
 
-// ── Extension → color category ──────────────────────────────────────
-// Mapped from mini.nvim's filetype_icons by determining which filetype
-// each extension typically corresponds to.
+const FT: Record<string, [string, H]> = {
+	ada: ["\u{f0477}", "A"], applescript: ["\u{f0035}", "Y"],
+	arduino: ["\u{f034b}", "A"], asm: ["\u{e637}", "P"],
+	astro: ["\u{e6b3}", "O"], awk: ["\u{e691}", "g"],
+	bash: ["\u{e691}", "G"], c: ["\u{f0671}", "B"],
+	clojure: ["\u{e768}", "G"], cmake: ["\u{f0664}", "O"],
+	cpp: ["\u{f0672}", "A"], crystal: ["\u{e62f}", "g"],
+	cs: ["\u{f031b}", "G"], csh: ["\u{e691}", "g"],
+	css: ["\u{f031c}", "A"], d: ["\u{e7af}", "G"],
+	dart: ["\u{e798}", "B"], dockerfile: ["\u{f0868}", "B"],
+	elixir: ["\u{e62d}", "P"], elm: ["\u{e62c}", "A"],
+	erlang: ["\u{e7b1}", "R"], fennel: ["\u{e6af}", "Y"],
+	fish: ["\u{e691}", "g"], fortran: ["\u{f035a}", "P"],
+	fsharp: ["\u{e7a7}", "B"], gdscript: ["\u{e65f}", "Y"],
+	glsl: ["\u{f03b4}", "C"], go: ["\u{f07d3}", "A"],
+	gomod: ["\u{f07d3}", "A"], gosum: ["\u{f07d3}", "C"],
+	gowork: ["\u{f07d3}", "P"], graphql: ["\u{f0877}", "R"],
+	groovy: ["\u{e775}", "A"], haskell: ["\u{f03b2}", "P"],
+	hcl: ["\u{f03b5}", "A"], heex: ["\u{e62d}", "R"],
+	html: ["\u{f031d}", "O"], hyprlang: ["\u{f0359}", "C"],
+	java: ["\u{f03b7}", "O"], javascript: ["\u{f031e}", "Y"],
+	javascriptreact: ["\u{e625}", "A"], jinja: ["\u{e66f}", "R"],
+	jq: ["\u{f0626}", "B"], json: ["\u{f0626}", "Y"],
+	julia: ["\u{e624}", "P"], just: ["\u{f05f7}", "O"],
+	kotlin: ["\u{f0359}", "B"], less: ["\u{f031c}", "P"],
+	lisp: ["\u{e6b0}", "g"], lua: ["\u{f08b1}", "A"],
+	make: ["\u{f0664}", "g"], markdown: ["\u{f0354}", "g"],
+	mojo: ["\u{f0878}", "R"], nim: ["\u{e677}", "Y"],
+	nix: ["\u{f3145}", "A"], ocaml: ["\u{e67a}", "O"],
+	odin: ["\u{f0394}", "B"], openscad: ["\u{f034e}", "Y"],
+	pascal: ["\u{f090a}", "R"], perl: ["\u{e67e}", "A"],
+	php: ["\u{f031f}", "P"], prisma: ["\u{e684}", "B"],
+	prolog: ["\u{e7a1}", "Y"], proto: ["\u{f09a0}", "R"],
+	purescript: ["\u{e630}", "g"], python: ["\u{f0320}", "Y"],
+	r: ["\u{f07d4}", "B"], racket: ["\u{f0627}", "R"],
+	raku: ["\u{f0589}", "Y"], rb: ["\u{f032d}", "R"],
+	rescript: ["\u{f03bf}", "A"], rmd: ["\u{f0354}", "A"],
+	roc: ["\u{f05c6}", "P"], rst: ["\u{f0284}", "Y"],
+	ruby: ["\u{f032d}", "R"], rust: ["\u{f0617}", "O"],
+	sass: ["\u{f07ec}", "R"], scala: ["\u{e737}", "R"],
+	scheme: ["\u{f0627}", "g"], scss: ["\u{f07ec}", "R"],
+	sh: ["\u{e691}", "g"], solidity: ["\u{e656}", "A"],
+	sql: ["\u{f01bc}", "g"], stata: ["\u{f05eb}", "R"],
+	stylus: ["\u{f0312}", "g"], svelte: ["\u{e697}", "O"],
+	swift: ["\u{f06e5}", "O"], terraform: ["\u{f0662}", "B"],
+	tex: ["\u{e69b}", "G"], toml: ["\u{e6b2}", "O"],
+	tsx: ["\u{e7ba}", "B"], twig: ["\u{e61c}", "G"],
+	typescript: ["\u{f06e6}", "A"], typst: ["\u{f06db}", "A"],
+	v: ["\u{e6ac}", "B"], vala: ["\u{f031d}", "P"],
+	vb: ["\u{f06e4}", "P"], verilog: ["\u{f035b}", "G"],
+	vhdl: ["\u{f035b}", "G"], vim: ["\u{e7c5}", "G"],
+	vue: ["\u{f0704}", "G"], wasm: ["\u{eae8}", "g"],
+	wgsl: ["\u{f03b4}", "B"], yaml: ["\u{e6a8}", "P"],
+	yang: ["\u{f03b6}", "C"], zig: ["\u{e6a9}", "O"],
+	zsh: ["\u{e691}", "G"],
 
-const EXT_HL: Record<string, HlName> = {
-	// Source code
-	ts: "Azure",
-	tsx: "Blue",
-	js: "Yellow",
-	jsx: "Azure",
-	mjs: "Yellow",
-	cjs: "Yellow",
-	cts: "Azure",
-	mts: "Azure",
-	rs: "Orange",
-	py: "Yellow",
-	go: "Azure",
-	java: "Orange",
-	rb: "Red",
-	c: "Blue",
-	h: "Purple",
-	cpp: "Azure",
-	cs: "Green",
-	swift: "Orange",
-	kt: "Blue",
-	scala: "Red",
-	dart: "Blue",
-	zig: "Orange",
-	nim: "Yellow",
-	crystal: "Grey",
-	elm: "Azure",
-	clj: "Green",
-	cljs: "Green",
-	ex: "Purple",
-	exs: "Purple",
-	hs: "Purple",
-	lua: "Azure",
-	php: "Purple",
-	pl: "Azure",
-	r: "Blue",
-	m: "Orange",
-	mm: "Yellow",
-
-	// Build & config
-	toml: "Orange",
-	yaml: "Purple",
-	yml: "Purple",
-	json: "Yellow",
-	jsonc: "Yellow",
-	xml: "Orange",
-	cfg: "Blue",
-	conf: "Grey",
-	ini: "Azure",
-	make: "Grey",
-	mk: "Grey",
-	cmake: "Orange",
-	bzl: "Green",
-	nix: "Azure",
-
-	// Web
-	css: "Azure",
-	scss: "Red",
-	sass: "Red",
-	less: "Purple",
-	html: "Orange",
-	htm: "Orange",
-	vue: "Green",
-	svelte: "Orange",
-	astro: "Orange",
-
-	// Shell
-	sh: "Grey",
-	bash: "Green",
-	zsh: "Green",
-	fish: "Grey",
-	ps1: "Blue",
-	bat: "Grey",
-	cmd: "Grey",
-
-	// Data
-	sql: "Grey",
-	db: "Cyan",
-	git: "Orange",
-	md: "Grey",
-	markdown: "Grey",
-	rst: "Yellow",
-	csv: "Green",
-	tsv: "Blue",
-	pdf: "Red",
-	svg: "Yellow",
-	txt: "Yellow",
+	// Config
+	apache: ["\u{f0313}", "G"], bzl: ["\u{e63a}", "G"],
+	cfg: ["\u{f0313}", "B"], conf: ["\u{f0313}", "g"],
+	config: ["\u{f0313}", "C"], desktop: ["\u{f03b9}", "P"],
+	diff: ["\u{f0693}", "R"], dosini: ["\u{f03c8}", "A"],
+	editorconfig: ["\u{e652}", "g"],
+	gitattributes: ["\u{f028a}", "Y"],
+	gitcommit: ["\u{f028a}", "G"],
+	gitconfig: ["\u{f0313}", "O"],
+	gitignore: ["\u{f028a}", "P"],
+	gitrebase: ["\u{f028a}", "A"],
+	gradle: ["\u{e660}", "O"], http: ["\u{f0337}", "O"],
+	kconfig: ["\u{f0313}", "P"], mermaid: ["\u{f03ba}", "C"],
+	meson: ["\u{f03ba}", "B"], nginx: ["\u{f0313}", "G"],
+	ninja: ["\u{f05f4}", "g"], sed: ["\u{f07e5}", "R"],
+	systemd: ["\u{f031a}", "g"], tcl: ["\u{f06d3}", "R"],
+	tf: ["\u{f03b5}", "R"], xml: ["\u{f05c0}", "O"],
 
 	// Media
-	png: "Purple",
-	jpg: "Orange",
-	jpeg: "Orange",
-	gif: "Azure",
-	webp: "Blue",
-	bmp: "Green",
-	ico: "Green",
-	mp3: "Azure",
-	wav: "Green",
-	flac: "Orange",
-	ogg: "Grey",
-	mp4: "Azure",
-	mkv: "Green",
-	mov: "Cyan",
-	avi: "Grey",
-	webm: "Grey",
+	aac: ["\u{f0223}", "Y"], avi: ["\u{f022b}", "g"],
+	bmp: ["\u{f021f}", "G"], eps: ["\u{e7b4}", "R"],
+	flac: ["\u{f0223}", "O"], gif: ["\u{f05f8}", "A"],
+	jpeg: ["\u{f0225}", "O"], jpg: ["\u{f0225}", "O"],
+	mkv: ["\u{f022b}", "G"], mov: ["\u{f022b}", "C"],
+	mp3: ["\u{f0223}", "A"], mp4: ["\u{f022b}", "A"],
+	mpeg: ["\u{f022b}", "P"], ogg: ["\u{f0223}", "g"],
+	png: ["\u{f0e2d}", "P"], svg: ["\u{f0721}", "Y"],
+	tiff: ["\u{f021f}", "Y"], wav: ["\u{f0223}", "G"],
+	webm: ["\u{f022b}", "g"], webp: ["\u{f021f}", "B"],
+	wma: ["\u{f0223}", "B"], wmv: ["\u{f022b}", "B"],
+
+	// Documents
+	doc: ["\u{f0492}", "A"], docx: ["\u{f0492}", "A"],
+	pdf: ["\u{f0226}", "R"], ppt: ["\u{f0490}", "R"],
+	pptx: ["\u{f0490}", "R"], xls: ["\u{f048f}", "G"],
+	xlsx: ["\u{f048f}", "G"],
 
 	// Archives
-	zip: "Azure",
-	tar: "Cyan",
-	gz: "Grey",
-	bz2: "Orange",
-	xz: "Green",
-	rar: "Green",
-	"7z": "Blue",
-	zst: "Yellow",
+	"7z": ["\u{f05c4}", "B"], bz2: ["\u{f05c4}", "O"],
+	deb: ["\u{f0187}", "R"], gz: ["\u{f05c4}", "g"],
+	rpm: ["\u{f0187}", "R"], rar: ["\u{f05c4}", "G"],
+	tar: ["\u{f05c4}", "C"], xz: ["\u{f05c4}", "G"],
+	zip: ["\u{f05c4}", "G"], zst: ["\u{f05c4}", "Y"],
 
-	// Lock & security
-	lock: "Grey",
-	pem: "Yellow",
-	key: "Yellow",
-	asc: "Yellow",
-	gpg: "Grey",
+	// Shells
+	bat: ["\u{f03c2}", "g"], cmd: ["\u{f03c2}", "g"],
+	ps1: ["\u{f028a}", "B"],
 
-	// Docs
-	doc: "Azure",
-	docx: "Azure",
-	xls: "Green",
-	xlsx: "Green",
-	ppt: "Red",
-	pptx: "Red",
-
-	// Rust
-	"cargo.lock": "Orange",
-
-	// Licenses
-	license: "Cyan",
+	// Security
+	asc: ["\u{f0659}", "Y"], gpg: ["\u{f0313}", "g"],
+	pem: ["\u{f0306}", "Y"], key: ["\u{f0306}", "Y"],
+	lock: ["\u{f0023}", "g"],
 };
 
-// ── lsd extension→codepoint mapping ────────────────────────────────
-// Extracted from lsd (Rust file lister) at
-// https://github.com/lsd-rs/lsd/blob/main/src/theme/icon.rs
+// ── Direct extension → [glyph, highlight] ───────────────────────────
+// From mini.nvim's H.extension_icons — extensions where filetype
+// matching alone gives wrong results.
 
-const LSD: Record<string, number> = {
-	"1": 0xf02d,
-	"2": 0xf02d,
-	"3": 0xf02d,
-	"4": 0xf02d,
-	"5": 0xf02d,
-	"6": 0xf02d,
-	"7": 0xf02d,
-	"7z": 0xf410,
-	"890": 0xf015e,
-	a: 0xe624,
-	ai: 0xe7b4,
-	ape: 0xf001,
-	apk: 0xe70e,
-	apng: 0xf1c5,
-	ar: 0xf410,
-	asc: 0xf099d,
-	asm: 0xf471,
-	asp: 0xf121,
-	avi: 0xf008,
-	avif: 0xf1c5,
-	avro: 0xe60b,
-	awk: 0xf489,
-	bak: 0xf006f,
-	bash: 0xf489,
-	bat: 0xf17a,
-	bin: 0xeae8,
-	blend: 0xf00ab,
-	bmp: 0xf1c5,
-	bz2: 0xf410,
-	c: 0xe61e,
-	"c++": 0xe61d,
-	cc: 0xe61d,
-	cfg: 0xe615,
-	cjs: 0xe74e,
-	class: 0xe738,
-	clj: 0xe768,
-	cljs: 0xe76a,
-	cls: 0xe600,
-	cmd: 0xf17a,
-	coffee: 0xf0f4,
-	conf: 0xe615,
-	cp: 0xe61d,
-	cpp: 0xe61d,
-	cr: 0xe629,
-	cs: 0xf031b,
-	csh: 0xf489,
-	css: 0xe749,
-	csv: 0xf1c3,
-	csx: 0xf031b,
-	cts: 0xe628,
-	cue: 0xf001,
-	cxx: 0xe61d,
-	dart: 0xe798,
-	dat: 0xf1c0,
-	db: 0xf1c0,
-	deb: 0xf187,
-	desktop: 0xf108,
-	diff: 0xe728,
-	dll: 0xf17a,
-	doc: 0xf1c2,
-	docx: 0xf1c2,
-	ds_store: 0xf179,
-	dump: 0xf1c0,
-	ebuild: 0xf30d,
-	eclass: 0xf30d,
-	editorconfig: 0xe615,
-	ejs: 0xe618,
-	el: 0xf0172,
-	elf: 0xf489,
-	elm: 0xe62c,
-	env: 0xf462,
-	eot: 0xf031,
-	epub: 0xe28a,
-	erb: 0xe73b,
-	erl: 0xe7b1,
-	ex: 0xe62d,
-	exe: 0xf17a,
-	exs: 0xe62d,
-	fish: 0xf489,
-	flac: 0xf001,
-	flv: 0xf008,
-	fnl: 0xe6af,
-	font: 0xf031,
-	fs: 0xe7a7,
-	fsi: 0xe7a7,
-	fsx: 0xe7a7,
-	gemfile: 0xe21e,
-	gif: 0xf1c5,
-	git: 0xf1d3,
-	go: 0xe627,
-	gpg: 0xf099d,
-	gradle: 0xe660,
-	gz: 0xf410,
-	h: 0xf0fd,
-	hbs: 0xe60f,
-	heic: 0xf1c5,
-	hh: 0xf0fd,
-	hpp: 0xf0fd,
-	hs: 0xe777,
-	htm: 0xf13b,
-	html: 0xf13b,
-	hxx: 0xf0fd,
-	ico: 0xf1c5,
-	iml: 0xe7b5,
-	in: 0xf15c,
-	info: 0xe795,
-	ini: 0xe615,
-	ipynb: 0xe606,
-	iso: 0xf1c0,
-	jar: 0xe738,
-	java: 0xe738,
-	jl: 0xe624,
-	jpeg: 0xf1c5,
-	jpg: 0xf1c5,
-	js: 0xe74e,
-	json: 0xe60b,
-	jsonc: 0xe60b,
-	jsx: 0xe7ba,
-	key: 0xf0306,
-	ksh: 0xf489,
-	kt: 0xe634,
-	kts: 0xe634,
-	ld: 0xe624,
-	less: 0xe758,
-	lhs: 0xe777,
-	license: 0xe60a,
-	lisp: 0xf0172,
-	lock: 0xf023,
-	log: 0xf18d,
-	lss: 0xe749,
-	lua: 0xe620,
-	lz: 0xf410,
-	m4a: 0xf001,
-	m4v: 0xf008,
-	make: 0xe615,
-	makefile: 0xe615,
-	man: 0xf02d,
-	md: 0xe609,
-	mjs: 0xe74e,
-	mk: 0xf085,
-	mkv: 0xf008,
-	ml: 0xe67a,
-	mli: 0xe67a,
-	mov: 0xf008,
-	mp3: 0xf001,
-	mp4: 0xf008,
-	msi: 0xf17a,
-	mts: 0xe628,
-	mustache: 0xe60f,
-	nim: 0xe677,
-	nix: 0xf313,
-	npmignore: 0xe71e,
-	o: 0xeae8,
-	ogg: 0xf001,
-	old: 0xf006f,
-	opus: 0xf001,
-	org: 0xe633,
-	otf: 0xf031,
-	part: 0xf43a,
-	patch: 0xe728,
-	pdf: 0xf1c1,
-	pem: 0xf0306,
-	php: 0xe608,
-	pl: 0xe769,
-	png: 0xf1c5,
-	ppt: 0xf1c4,
-	pptx: 0xf1c4,
-	ps1: 0xf489,
-	psd: 0xe7b8,
-	py: 0xe606,
-	pyc: 0xe606,
-	r: 0xf0cf,
-	rar: 0xf410,
-	rb: 0xe21e,
-	rs: 0xe68b,
-	rss: 0xf09e,
-	ru: 0xe68b,
-	scala: 0xe737,
-	scss: 0xe603,
-	sh: 0xf489,
-	so: 0xeae8,
-	sql: 0xe7c4,
-	sqlite: 0xe7c4,
-	srt: 0xf001,
-	styl: 0xe603,
-	sv: 0xe5fe,
-	svg: 0xf1c5,
-	swift: 0xe755,
-	tar: 0xf410,
-	tex: 0xe69b,
-	tgz: 0xf410,
-	tiff: 0xf1c5,
-	toml: 0xe615,
-	torrent: 0xf023,
-	ts: 0xe628,
-	tsx: 0xe7ba,
-	ttf: 0xf031,
-	twig: 0xe60f,
-	txt: 0xf15c,
-	v: 0xe5fe,
-	vim: 0xe62b,
-	vue: 0xe6a8,
-	wasm: 0xeae8,
-	wav: 0xf001,
-	webm: 0xf008,
-	webp: 0xf1c5,
-	wma: 0xf001,
-	wmv: 0xf008,
-	woff: 0xf031,
-	woff2: 0xf031,
-	xcf: 0xe7b8,
-	xls: 0xf1c3,
-	xlsx: 0xf1c3,
-	xml: 0xf121,
-	xz: 0xf410,
-	yaml: 0xe615,
-	yml: 0xe615,
-	zig: 0xe6a9,
-	zip: 0xf410,
-	zsh: 0xf489,
-	zst: 0xf410,
+const EXT: Record<string, [string, H]> = {
+	// Filetype mismatch cases
+	h: ["\u{f03b5}", "P"], ipynb: ["\u{f062e}", "O"],
+	exs: ["\u{e653}", "P"],
+
+	// Video (extra)
+	"3gp": ["\u{f022b}", "Y"], cast: ["\u{f022b}", "R"],
+	m4v: ["\u{f022b}", "O"], mpg: ["\u{f022b}", "P"],
+
+	// Audio (extra)
+	aif: ["\u{f0223}", "C"], snd: ["\u{f0223}", "R"],
+
+	// Image (extra)
+	heic: ["\u{f021f}", "B"], heif: ["\u{f021f}", "B"],
+	tif: ["\u{f021f}", "Y"],
+
+	// Archives (extra)
+	bz: ["\u{f05c4}", "O"], sit: ["\u{f05c4}", "R"],
+	txz: ["\u{f05c4}", "P"], z: ["\u{f05c4}", "g"],
+
+	// Software
+	exe: ["\u{f05f3}", "R"],
+	xlt: ["\u{f048f}", "G"], xltm: ["\u{f048f}", "G"],
+	xltx: ["\u{f048f}", "G"],
+};
+
+// ── Extension → filetype ────────────────────────────────────────────
+// For extensions not in EXT, map to the filetype name used in FT.
+
+const EXT_FT: Record<string, string> = {
+	ts: "typescript", tsx: "tsx", js: "javascript",
+	jsx: "javascriptreact", mjs: "javascript", cjs: "javascript",
+	cts: "typescript", mts: "typescript",
+	rb: "ruby", py: "python", rs: "rust", go: "go", java: "java",
+	kt: "kotlin", kts: "kotlin", cpp: "cpp", c: "c", hpp: "cpp",
+	hh: "cpp", hxx: "cpp", cc: "cpp", cxx: "cpp", cs: "cs",
+	swift: "swift", scala: "scala", dart: "dart", zig: "zig",
+	nim: "nim", ex: "elixir", exs: "elixir", hs: "haskell",
+	lhs: "haskell", lua: "lua", php: "php", pl: "perl", pm: "perl",
+	r: "r", m: "objc", mm: "objcpp",
+	clj: "clojure", cljs: "clojure", cljc: "clojure", elm: "elm",
+	crystal: "crystal", purs: "purescript",
+	fn: "fsharp", fs: "fsharp", fsscript: "fsharp",
+	svelte: "svelte", vue: "vue", astro: "astro",
+	sass: "sass", scss: "scss", less: "less", styl: "stylus",
+	css: "css", html: "html", htm: "html", xhtml: "html",
+	md: "markdown", rmd: "rmd", rst: "rst", org: "org",
+	tex: "tex", bib: "bib",
+	json: "json", jsonc: "json", yaml: "yaml", yml: "yaml",
+	toml: "toml", xml: "xml", sql: "sql", sqlite: "sql",
+	cmake: "cmake", make: "make", mk: "make", bzl: "bzl",
+	nix: "nix", dockerfile: "dockerfile", just: "just",
+	typst: "typst", prisma: "prisma", gradle: "gradle",
+	proto: "proto", graphql: "graphql", jinja: "jinja",
+	vala: "vala", odin: "odin", mojo: "mojo", julia: "julia",
+	raku: "raku", wasm: "wasm", haddock: "haskell",
+	"7z": "7z", zip: "zip", tar: "tar", gz: "gz", bz2: "bz2",
+	xz: "xz", rar: "rar", zst: "zst",
+	pdf: "pdf", doc: "doc", docx: "docx", xls: "xls",
+	xlsx: "xlsx", ppt: "ppt", pptx: "pptx",
+	sh: "sh", bash: "bash", zsh: "zsh", fish: "fish", ps1: "ps1",
+	bat: "bat", cmd: "cmd", csh: "csh", ksh: "ksh",
+	csv: "csv", tsv: "csv", env: "env", lock: "lock", log: "log",
+	txt: "txt", png: "png", jpg: "jpg", jpeg: "jpg", gif: "gif",
+	webp: "webp", bmp: "bmp", ico: "bmp", svg: "svg",
+	mp3: "mp3", wav: "wav", flac: "flac", ogg: "ogg",
+	m4a: "m4a", mp4: "mp4", mkv: "mkv", mov: "mov", avi: "avi",
+	webm: "webm", wmv: "wmv", diff: "diff", patch: "diff",
+	vim: "vim", license: "license", editorconfig: "editorconfig",
+	cfg: "cfg", conf: "conf", ini: "cfg", desktop: "desktop",
+	asc: "asc", gpg: "gpg", pem: "pem", key: "key",
 };
 
 // ── Public API ──────────────────────────────────────────────────────
 
-const DEFAULT_HL: HlName = "Grey";
-
-/**
- * Get icon character, hex color, and highlight group for a file extension.
- */
 export function getFileIcon(
 	extension: string,
 ): { icon: string; color: string } | null {
 	const ext = extension.replace(/^\./, "").toLowerCase();
 	if (!ext) return null;
 
-	const cp = LSD[ext];
-	const hl = EXT_HL[ext] ?? DEFAULT_HL;
-	const color = HL[hl];
+	// 1. Try direct extension match
+	if (ext in EXT) {
+		const hit = EXT[ext]!;
+		return { icon: hit[0] + " ", color: HL[hit[1]] };
+	}
 
-	const icon = cp ? String.fromCodePoint(cp) : null;
-	if (!icon) return null;
+	// 2. Try extension → filetype → filetype table
+	const ft = EXT_FT[ext] ?? ext;
+	if (ft in FT) {
+		const hit = FT[ft]!;
+		return { icon: hit[0] + " ", color: HL[hit[1]] };
+	}
 
-	return { icon: icon + " ", color };
+	return null;
 }
 
-/**
- * Check if a file extension has a known icon.
- */
 export function hasFileIcon(extension: string): boolean {
 	const ext = extension.replace(/^\./, "").toLowerCase();
-	return ext in LSD;
+	if (!ext) return false;
+	if (ext in EXT) return true;
+	return (EXT_FT[ext] ?? ext) in FT;
 }
