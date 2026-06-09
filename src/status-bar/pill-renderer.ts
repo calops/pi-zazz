@@ -112,10 +112,10 @@ function renderPill(
 			// Closing  transitions to extension bg when present, otherwise terminal default
 			(hasRightExt && p.rightExt
 				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\u{E0B4}\x1b[0m` +
-					// Extension content (blended under the )
-					`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
-					// Extension closing  (true color)
-					`\x1b[38;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[49m\u{E0B4}\x1b[0m`
+				// Extension content (blended under the )
+				`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
+				// Extension closing  (true color)
+				`\x1b[38;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[49m\u{E0B4}\x1b[0m`
 				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
 			// Single space between pills
 			(trailingSpace ? " " : "")
@@ -222,7 +222,7 @@ function extractPillColors(styled: string): {
 }
 
 export function makePill(iconStr: string, text: string, color: ColorFn): Pill {
-	const content = iconStr ? `${iconStr} ${text}` : text;
+	const content = iconStr ? `${iconStr}${text}` : text;
 	const styled = color(content);
 	const colors = extractPillColors(styled);
 	return {

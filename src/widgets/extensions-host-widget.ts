@@ -67,21 +67,44 @@ export const extensionsHostWidgetFactory: WidgetFactory = (
 			// Get active widgets
 			const activeKeys = getActiveKeys(minWidgetWidth);
 
-			// ── Compute layout ─────────────────────────────────────────────
-			const columns = Math.max(
-				1,
-				Math.min(maxWidgetsPerRow, Math.floor(w / minWidgetWidth)),
-			);
-
-			// ── Render each widget into its own column data ─────────────────
-			// Each column = { key, lines[] }
+			// ── Render each widget at a probe width to see actual content ──
+			const probeWidth = Math.min(w, minWidgetWidth);
 			const columnsData: Array<{ key: string; lines: string[] }> = [];
-			const cellWidth = Math.floor((w - (columns - 1)) / columns); // -1 for borders
-
 			for (const key of activeKeys) {
-				const lines = renderWidget(key, cellWidth);
+				const lines = renderWidget(key, probeWidth);
 				if (lines.length > 0) {
 					columnsData.push({ key, lines });
+				}
+			}
+
+			if (columnsData.length === 0) {
+				lastRenderHadContent = false;
+				return [];
+			}
+
+			// ── Compute layout based on actual widget count ────────────────
+			// Limit columns to available width AND the number of widgets that
+			// actually produced content. This ensures a single widget gets
+			// full width instead of being split into a half-width cell.
+			const columns = Math.max(
+				1,
+				Math.min(
+					maxWidgetsPerRow,
+					columnsData.length,
+					Math.floor(w / minWidgetWidth),
+				),
+			);
+			const cellWidth = Math.floor((w - (columns - 1)) / columns);
+
+			// ── Re-render each widget at the actual cell width ─────────────
+			for (const col of columnsData) {
+				col.lines = renderWidget(col.key, cellWidth);
+			}
+
+			// Filter out widgets that produced no content after re-render
+			for (let i = columnsData.length - 1; i >= 0; i--) {
+				if (columnsData[i]!.lines.length === 0) {
+					columnsData.splice(i, 1);
 				}
 			}
 

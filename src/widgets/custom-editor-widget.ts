@@ -3,7 +3,6 @@ import {
 	type EditorOptions,
 	type EditorTheme,
 	visibleWidth,
-	truncateToWidth,
 	getKeybindings,
 	type Component,
 	type OverlayHandle,
@@ -13,10 +12,28 @@ import type {
 	AutocompleteItem,
 	AutocompleteProvider,
 } from "@earendil-works/pi-tui";
+import { getFileIcon } from "../completion/file-icons.ts";
 import { icon } from "../icons.ts";
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory, WidgetInstance } from "./types.ts";
 import type { GridCellInfo } from "../grid/types.ts";
+import type { CompletionCategory } from "../completion/categories.ts";
+import {
+	computeItemCategories,
+	categoryColorName,
+} from "../completion/categories.ts";
+import {
+	type Column,
+	type ColumnLayout,
+	computeLayout,
+	renderRow,
+	measureDescriptionWidth,
+	selectionColumn,
+	iconColumn,
+	labelColumn,
+	descriptionColumn,
+	cleanDescription,
+} from "../completion/columns.ts";
 
 // ── Completion overlay component ────────────────────────────────────
 
@@ -24,42 +41,42 @@ class CompletionOverlayComponent implements Component {
 	items: AutocompleteItem[] = [];
 	selectedIdx = 0;
 	width = 40;
+	/** Per-item category for the icon column */
+	categories: CompletionCategory[] = [];
+
+	/** The column definitions (set once by showCompletionOverlay) */
+	columns: Column[] = [];
+	/** The column layout (recomputed on every render) */
+	layout: ColumnLayout[] = [];
 
 	render(_width: number): string[] {
 		if (this.items.length === 0) return [];
 
+		const actualWidth = _width > 0 ? _width : this.width;
 		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
-		const bright = (s: string) => `\x1b[1m${s}\x1b[22m`;
 
-		// Content area inside the border: │(space)…(space)│
-		const innerWidth = this.width - 4;
+		// Recompute layout from columns + items + available width
+		const innerWidth = actualWidth - 4; // │ (content) │
+		this.layout = computeLayout(this.columns, this.items, innerWidth);
 
 		const lines: string[] = [];
 
 		// Top rounded border
-		lines.push(dim(`╭${`─`.repeat(Math.max(0, this.width - 2))}╮`));
+		lines.push(dim(`╭${`─`.repeat(Math.max(0, actualWidth - 2))}╮`));
 
 		for (let i = 0; i < this.items.length; i++) {
 			const item = this.items[i]!;
-			const isSel = i === this.selectedIdx;
-
-			// Selected item: ▶ prefix + bold; others: two spaces + dim
-			const prefix = isSel ? "▶ " : "  ";
-			let content = `${prefix}${isSel ? bright(item.label) : item.label}`;
-			if (item.description) content += dim(`  ${item.description}`);
-
-			// Truncate content that spills past the right border
-			const truncated =
-				visibleWidth(content) > innerWidth
-					? truncateToWidth(content, innerWidth, "…")
-					: content;
-			const tw = visibleWidth(truncated);
-			const pad = Math.max(0, innerWidth - tw);
-			lines.push(dim("│ ") + truncated + " ".repeat(pad) + dim(" │"));
+			const ctx = {
+				category: this.categories[i] ?? ("builtin" as CompletionCategory),
+				isSelected: i === this.selectedIdx,
+			};
+			const content = renderRow(this.columns, this.layout, item, ctx);
+			const pad = Math.max(0, innerWidth - visibleWidth(content));
+			lines.push(dim("│ ") + content + " ".repeat(pad) + dim(" │"));
 		}
 
 		// Bottom rounded border
-		lines.push(dim(`╰${`─`.repeat(Math.max(0, this.width - 2))}╯`));
+		lines.push(dim(`╰${`─`.repeat(Math.max(0, actualWidth - 2))}╯`));
 
 		return lines;
 	}
@@ -118,18 +135,9 @@ class OverlayEditor extends Editor {
 	constructor(tui: TUI, theme: EditorTheme, options?: EditorOptions) {
 		super(tui, theme, options);
 
-		// Monkey-patch three private methods to intercept completion rendering.
-		// TypeScript `private` is compile-time only — at runtime these are
-		// regular prototype methods we can override via bracket assignment.
 		const self = this as unknown as Record<string, unknown>;
 		const origClear = self["clearAutocompleteUi"] as () => void;
 
-		// 1) createAutocompleteList — build stub SelectList + show our overlay
-		// Note: this replaces the prototype method, called from the parent class's
-		// applyAutocompleteSuggestions with (prefix, items) from the suggestion payload.
-		// We MUST use those parameters rather than reading autocompleteState (which
-		// hasn't been updated yet at that point) and MUST return the stub so the
-		// caller's `this.autocompleteList = this.createAutocompleteList(...)` works.
 		self["createAutocompleteList"] = (
 			_prefix: string,
 			items: AutocompleteItem[],
@@ -148,23 +156,20 @@ class OverlayEditor extends Editor {
 				}
 			});
 
-			this.showCompletionOverlay(visible);
+			this.showCompletionOverlay(visible, _prefix);
 			return stub;
 		};
 
-		// 2) clearAutocompleteUi — hide our overlay + call original for cleanup
 		self["clearAutocompleteUi"] = () => {
 			origClear.call(this);
 			this.hideCompletionOverlay();
 		};
 
-		// 3) isShowingAutocomplete — delegate to our overlay state
 		self["isShowingAutocomplete"] = () => this.completionHandle !== null;
 	}
 
 	override render(width: number): string[] {
 		if (!this.borderEnabled) {
-			// Simple mode: no border, just arrow prefix
 			const arrowW = 2;
 			const contentWidth = Math.max(1, width - arrowW);
 
@@ -175,7 +180,7 @@ class OverlayEditor extends Editor {
 
 			if (content.length > 0 && content[0]) {
 				const arrow =
-					this.deps?.theme?.fg?.("muted", icon("promptArrow") + " ") ??
+					this.deps?.theme?.fg?.("muted", icon("promptArrow")) ??
 					`\x1b[2m${icon("promptArrow")} \x1b[22m`;
 				content[0] = arrow + content[0];
 			}
@@ -183,10 +188,7 @@ class OverlayEditor extends Editor {
 			return content;
 		}
 
-		// Bordered mode: rounded border around the editor
-		// 2 chars left ("│ ") + 2 chars right (" │") = 4 total for borders
 		const borderInner = Math.max(1, width - 4);
-		// Arrow prefix inside the border
 		const contentWidth = Math.max(1, width - 6);
 
 		const lines = super.render(contentWidth);
@@ -194,7 +196,6 @@ class OverlayEditor extends Editor {
 
 		const editorContent = lines.slice(1, -1);
 
-		// Border color: green for bash, theme border otherwise
 		const isBash = this.getText().startsWith("!");
 		const sty = (text: string) =>
 			isBash
@@ -202,17 +203,14 @@ class OverlayEditor extends Editor {
 					`\x1b[38;5;2m${text}\x1b[0m`)
 				: (this.deps?.theme?.fg?.("border", text) ?? text);
 
-		// Arrow indicator for the first line (muted)
 		const arrow =
 			this.deps?.theme?.fg?.("muted", icon("promptArrow") + " ") ??
 			`\x1b[2m${icon("promptArrow")} \x1b[22m`;
 
 		const result: string[] = [];
 
-		// Top border: ╭────╮
 		result.push(sty(`╭`) + sty(`─`.repeat(borderInner)) + sty(`╮`));
 
-		// Content lines
 		for (let i = 0; i < editorContent.length; i++) {
 			let line = editorContent[i]!.trimEnd();
 			if (i === 0) line = arrow + line;
@@ -221,7 +219,6 @@ class OverlayEditor extends Editor {
 			result.push(sty("│ ") + line + " ".repeat(pad) + sty(" │"));
 		}
 
-		// Bottom border: ╰────╯
 		result.push(sty(`╰`) + sty(`─`.repeat(borderInner)) + sty(`╯`));
 
 		return result;
@@ -239,22 +236,102 @@ class OverlayEditor extends Editor {
 
 	// ── Overlay management ──────────────────────────────────────────
 
-	private showCompletionOverlay(items: AutocompleteItem[]): void {
+	private showCompletionOverlay(items: AutocompleteItem[], prefix = ""): void {
 		this.hideCompletionOverlay();
 		if (items.length === 0 || !this.cell || !this.deps) return;
 
 		const popupH = items.length;
 
-		// Measure visible content width (prefix 2 + label + optional "  " + description)
-		let maxContent = 10;
-		for (const item of items) {
-			let w = 2 + visibleWidth(item.label);
-			if (item.description) w += 2 + visibleWidth(item.description);
-			if (w > maxContent) maxContent = w;
-		}
-		// Add 4 for border overhead ("│ " left + " │" right)
-		const popupW = Math.min(Math.max(maxContent + 4, 24), 64);
+		// Determine category for each item
+		const categories = computeItemCategories(items, prefix);
 
+		// Strip redundant prefixes from labels (e.g. "skill:" when icon shows it)
+		items = items.map((item, i) => {
+			if (categories[i] === "skill" && item.label.startsWith("skill:")) {
+				return { ...item, label: item.label.slice(6) };
+			}
+			return item;
+		});
+
+		// Build colour helpers from theme
+		const colorFn = (cat: CompletionCategory, text: string) =>
+			this.deps!.theme.fg(categoryColorName(cat), text);
+		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		const sourceTagStyle = (tag: string) => {
+			if (tag === "custom") return dim(this.deps!.theme.fg("success", tag));
+			if (tag === "builtin") return dim(this.deps!.theme.fg("warning", tag));
+			return dim(this.deps!.theme.fg("accent", tag));
+		};
+
+		// Pre-clean descriptions at setup time: extract source tag + rest
+		// and store them on the item so the render path always has access
+		// to clean data regardless of how cleanDescription is called.
+		items = items.map((item) => {
+			if (!item.description) return item;
+			let { tag, rest } = cleanDescription(item.description);
+			// Map single-letter scope to "custom" for local extensions
+			if (tag === "u") tag = "custom";
+			// Show a "builtin" label only for slash commands, not @ completions
+			if (tag === null && prefix.startsWith("/")) tag = "builtin";
+			return {
+				...item,
+				_cleanTag: tag,
+				_cleanRest: rest,
+			};
+		});
+
+		// Pre-compute file-type-specific Nerd Font icons for @ completions
+		// Uses lsd's comprehensive extension mapping, falls back to Seti
+		items = items.map((item, i) => {
+			const cat = categories[i];
+			if (cat !== "file" && cat !== "directory") return item;
+			try {
+				const ext = item.label.includes(".")
+					? item.label.split(".").pop()!
+					: "";
+				const fileIcon = ext ? getFileIcon(ext) : null;
+				if (fileIcon) {
+					const hex = fileIcon.color;
+					const r = Number.parseInt(hex.slice(1, 3), 16);
+					const g = Number.parseInt(hex.slice(3, 5), 16);
+					const b = Number.parseInt(hex.slice(5, 7), 16);
+					const styled = `\x1b[38;2;${r};${g};${b}m${fileIcon.icon}\x1b[39m`;
+					return { ...item, _nerdIcon: styled };
+				}
+			} catch {
+				/* fall back to generic file/dir icon */
+			}
+			return item;
+		});
+
+		// Build column definitions with env
+		const colEnv = { colorFn, sourceTagStyle };
+		const columns: Column[] = [
+			selectionColumn(),
+			iconColumn(colEnv),
+			labelColumn(),
+			descriptionColumn(colEnv),
+		];
+
+		// Compute ideal inner width: fixed column widths + max cleaned description
+		const fixedW = columns
+			.slice(0, -1)
+			.reduce((sum, col) => sum + col.measure(items), 0);
+		const descW = measureDescriptionWidth(items);
+		const idealInner = fixedW + descW;
+
+		// Read terminal width and cap at 90%
+		const tuiTerm = (this as unknown as Record<string, unknown>)["tui"] as
+			| { terminal?: { columns?: number } }
+			| undefined;
+		const termWidth = tuiTerm?.terminal?.columns ?? 80;
+		const maxInner = Math.floor(termWidth * 0.9) - 4;
+
+		// Popup inner width: prefer ideal, cap at 90% terminal, floor at minimum
+		const popupInner = Math.max(20, Math.min(idealInner, maxInner));
+		const popupW = popupInner + 4;
+
+		// Compute popup height and position
 		const gridTop =
 			((this.deps as unknown as Record<string, unknown>).gridTopRow as
 				| number
@@ -266,24 +343,23 @@ class OverlayEditor extends Editor {
 		const cursorTerminalRow =
 			gridTop + this.cell.terminalRow + cursorVisibleRow;
 
-		// Total popup height = items + 2 border lines (top rounded + bottom rounded)
-		const totalPopupH = popupH + 2;
+		const totalPopupH = popupH + 2; // items + 2 border lines
 		let popupRow = cursorTerminalRow - totalPopupH;
 		if (popupRow < 0) popupRow = cursorTerminalRow + 1;
 
-		// Popup's internal `  ` prefix aligns its text with the cursor's visual column.
-		// Anchor at the cursor; don't clamp to the right — the terminal clips naturally
-		// and it's better to lose the right edge than to appear far from where the user
-		// is typing.
 		const popupCol = this.cell.terminalCol + (cursor.col as number);
-		const clampedCol = Math.max(0, popupCol);
+		const maxCol = Math.max(0, termWidth - popupW);
+		const clampedCol = Math.min(Math.max(0, popupCol), maxCol);
 
-		this.completionComponent = new CompletionOverlayComponent();
-		this.completionComponent.items = items;
-		this.completionComponent.selectedIdx = 0;
-		this.completionComponent.width = popupW;
+		// Build component
+		const comp = new CompletionOverlayComponent();
+		comp.categories = categories;
+		comp.items = items;
+		comp.selectedIdx = 0;
+		comp.width = popupW;
+		comp.columns = columns;
+		this.completionComponent = comp;
 
-		// tui is the protected field from Editor
 		const tuiObj = (this as unknown as Record<string, unknown>)["tui"] as TUI;
 		this.completionHandle = tuiObj.showOverlay(this.completionComponent, {
 			nonCapturing: true,

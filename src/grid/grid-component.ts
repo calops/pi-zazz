@@ -3,7 +3,13 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { WidgetDeps, WidgetInstance } from "../widgets/types.ts";
 import { createFromConfig } from "../widgets/registry.ts";
 import { computeLayout } from "./grid-engine.ts";
-import type { GridConfig, GridCellInfo, ColumnLayout } from "./types.ts";
+import type {
+	GridConfig,
+	GridCellInfo,
+	ColumnLayout,
+	ColumnConfig,
+	RowLayout,
+} from "./types.ts";
 
 /**
  * GridComponent is a pure renderer for the grid layout.
@@ -87,89 +93,15 @@ export class GridComponent {
 				}
 
 				// ── Redistribute width among visible columns ───────────────────
-				const redistributed: Array<{
-					layout: ColumnLayout;
-					width: number;
-				}> = [];
-				if (visibleIndices.length === 1) {
-					const col = row.columns[visibleIndices[0]!]!;
-					redistributed.push({
-						layout: col,
-						width: Math.max(1, width - (col.borderLeft ? 1 : 0)),
-					});
-				} else if (visibleIndices.length > 1) {
-					const totalFractions = visibleIndices.reduce(
-						(s, ci) => s + (colCfgs[ci]?.width.fraction ?? 1),
-						0,
-					);
-					const effectiveTotal =
-						totalFractions > 0 ? totalFractions : visibleIndices.length;
-					const mins = visibleIndices.map((ci) => colCfgs[ci]?.width.min ?? 1);
-					const totalMins = mins.reduce((s, m) => s + m, 0);
-					const distributable = Math.max(0, width - totalMins);
-
-					let used = 0;
-					for (let i = 0; i < visibleIndices.length; i++) {
-						const ci = visibleIndices[i]!;
-						const col = row.columns[ci]!;
-						const cfg = colCfgs[ci];
-						const fraction = cfg?.width.fraction ?? 1;
-						const min = cfg?.width.min ?? 1;
-						let w =
-							min + Math.floor((distributable * fraction) / effectiveTotal);
-						if (cfg?.width.max !== undefined) {
-							w = Math.min(w, cfg.width.max);
-						}
-						redistributed.push({ layout: col, width: w });
-						used += w;
-					}
-					// Distribute any leftover space
-					for (let i = 0; i < redistributed.length && used < width; i++) {
-						const rw = redistributed[i]!;
-						const cfg = colCfgs[visibleIndices[i]!];
-						const max = cfg?.width.max ?? Number.POSITIVE_INFINITY;
-						const add = Math.min(width - used, max - rw.width);
-						redistributed[i] = { ...rw, width: rw.width + add };
-						used += add;
-					}
-				}
+				const redistributed = this.computeDistributedWidths(
+					visibleIndices,
+					row.columns,
+					colCfgs,
+					width,
+				);
 
 				// ── Phase A: Determine scrollbar needs ────────────────────────
-				const scrollbarData = new Map<
-					string,
-					{ chars: string[]; contentWidth: number }
-				>();
-
-				for (let vi = 0; vi < redistributed.length; vi++) {
-					const rw = redistributed[vi]!;
-					if (!rw.layout.scrollable) continue;
-
-					const key = `${row.id}:${rw.layout.id}`;
-					const widget = this.widgets.get(key);
-					if (!widget?.getContentHeight) continue;
-
-					const contentHeight = widget.getContentHeight();
-					if (contentHeight <= row.maxHeight) continue; // no overflow
-
-					const viewportHeight = Math.max(1, row.maxHeight);
-					const maxOffset = Math.max(1, contentHeight - viewportHeight);
-					const scrollOff = widget.getScrollOffset?.() ?? 0;
-					const thumbRow = Math.round(
-						(scrollOff / maxOffset) * (viewportHeight - 1),
-					);
-
-					const chars: string[] = [];
-					for (let li = 0; li < viewportHeight; li++) {
-						chars.push(
-							li === thumbRow ? this.accentColorFn("█") : this.dimColorFn("│"),
-						);
-					}
-
-					scrollbarData.set(key, {
-						chars,
-						contentWidth: rw.width - 1,
-					});
-				}
+				const scrollbarData = this.computeScrollbarData(redistributed, row);
 
 				// ── Phase B: Render widgets ────────────────────────────────────
 				let maxCellHeight = 0;
@@ -190,6 +122,75 @@ export class GridComponent {
 					const lines = widget.render(renderWidth, row.maxHeight);
 					cellLines.push(lines);
 					maxCellHeight = Math.max(maxCellHeight, lines.length);
+				}
+
+				// ── Phase B2: Reclaim width from empty columns ────────────────
+				// If a column rendered 0 content lines and other columns have
+				// content, exclude the empty column and redistribute its width
+				// among content-bearing cells. This implements elastic cells:
+				// cells grow to fill available space when no other cell is
+				// populated, and only shrink to make room for others.
+				if (redistributed.length > 1) {
+					const contentVIs: number[] = [];
+					for (let vi = 0; vi < cellLines.length; vi++) {
+						if (cellLines[vi]!.length > 0) {
+							contentVIs.push(vi);
+						}
+					}
+
+					if (
+						contentVIs.length > 0 &&
+						contentVIs.length < redistributed.length
+					) {
+						// Map content-bearing indices back to original column indices
+						const newVisibleIndices = contentVIs.map(
+							(vi) => visibleIndices[vi]!,
+						);
+
+						// Redistribute width among content-bearing columns
+						const newRedist = this.computeDistributedWidths(
+							newVisibleIndices,
+							row.columns,
+							colCfgs,
+							width,
+						);
+
+						// Rebuild scrollbar data for new widths
+						const newScrollbarData = this.computeScrollbarData(newRedist, row);
+
+						// Re-render content-bearing columns at new widths
+						const newCellLines: string[][] = [];
+						let newMaxCellHeight = 0;
+						for (const rw of newRedist) {
+							const key = `${row.id}:${rw.layout.id}`;
+							const sbData = newScrollbarData.get(key);
+							const renderWidth = sbData ? sbData.contentWidth : rw.width;
+
+							const widget = this.getWidget(
+								rw.layout.id,
+								row.id,
+								row.columns.findIndex((c) => c.id === rw.layout.id),
+								terminalRow,
+								0,
+							);
+							const lines = widget.render(renderWidth, row.maxHeight);
+							newCellLines.push(lines);
+							newMaxCellHeight = Math.max(newMaxCellHeight, lines.length);
+						}
+
+						// Commit updated state for downstream Phase C / D
+						visibleIndices.length = 0;
+						visibleIndices.push(...newVisibleIndices);
+						redistributed.length = 0;
+						redistributed.push(...newRedist);
+						cellLines.length = 0;
+						cellLines.push(...newCellLines);
+						maxCellHeight = newMaxCellHeight;
+						scrollbarData.clear();
+						for (const [k, v] of newScrollbarData) {
+							scrollbarData.set(k, v);
+						}
+					}
 				}
 
 				// ── Phase C: Compose final lines with scrollbar ───────────────
@@ -363,6 +364,112 @@ export class GridComponent {
 			this.widgets.set(key, widget);
 		}
 		return widget;
+	}
+
+	/**
+	 * Distribute total width among a set of column indices (from the original
+	 * row.columns array) using each column's fraction, min, and max constraints.
+	 */
+	private computeDistributedWidths(
+		colIndices: readonly number[],
+		columns: readonly ColumnLayout[],
+		colCfgs: readonly (ColumnConfig | undefined)[],
+		totalWidth: number,
+	): Array<{ layout: ColumnLayout; width: number }> {
+		const result: Array<{ layout: ColumnLayout; width: number }> = [];
+
+		if (colIndices.length === 0) return result;
+
+		if (colIndices.length === 1) {
+			const ci = colIndices[0]!;
+			const col = columns[ci]!;
+			result.push({
+				layout: col,
+				width: Math.max(1, totalWidth - (col.borderLeft ? 1 : 0)),
+			});
+			return result;
+		}
+
+		const totalFractions = colIndices.reduce(
+			(s, ci) => s + (colCfgs[ci]?.width.fraction ?? 1),
+			0,
+		);
+		const effectiveTotal =
+			totalFractions > 0 ? totalFractions : colIndices.length;
+		const mins = colIndices.map((ci) => colCfgs[ci]?.width.min ?? 1);
+		const totalMins = mins.reduce((s, m) => s + m, 0);
+		const distributable = Math.max(0, totalWidth - totalMins);
+
+		let used = 0;
+		for (let i = 0; i < colIndices.length; i++) {
+			const ci = colIndices[i]!;
+			const col = columns[ci]!;
+			const cfg = colCfgs[ci];
+			const fraction = cfg?.width.fraction ?? 1;
+			const min = cfg?.width.min ?? 1;
+			let w = min + Math.floor((distributable * fraction) / effectiveTotal);
+			if (cfg?.width.max !== undefined) {
+				w = Math.min(w, cfg.width.max);
+			}
+			result.push({ layout: col, width: w });
+			used += w;
+		}
+
+		// Distribute any leftover space
+		for (let i = 0; i < result.length && used < totalWidth; i++) {
+			const rw = result[i]!;
+			const cfg = colCfgs[colIndices[i]!];
+			const max = cfg?.width.max ?? Number.POSITIVE_INFINITY;
+			const add = Math.min(totalWidth - used, max - rw.width);
+			result[i] = { ...rw, width: rw.width + add };
+			used += add;
+		}
+
+		return result;
+	}
+
+	/**
+	 * Compute scrollbar character data for scrollable columns.
+	 * Returns a Map from column key ("rowId:colId") to scrollbar chars and
+	 * the adjusted content width (minus 1 for the scrollbar track).
+	 */
+	private computeScrollbarData(
+		colWidths: ReadonlyArray<{ layout: ColumnLayout; width: number }>,
+		row: RowLayout,
+	): Map<string, { chars: string[]; contentWidth: number }> {
+		const data = new Map<string, { chars: string[]; contentWidth: number }>();
+
+		for (const rw of colWidths) {
+			if (!rw.layout.scrollable) continue;
+
+			const key = `${row.id}:${rw.layout.id}`;
+			const widget = this.widgets.get(key);
+			if (!widget?.getContentHeight) continue;
+
+			const contentHeight = widget.getContentHeight();
+			if (contentHeight <= row.maxHeight) continue; // no overflow
+
+			const viewportHeight = Math.max(1, row.maxHeight);
+			const maxOffset = Math.max(1, contentHeight - viewportHeight);
+			const scrollOff = widget.getScrollOffset?.() ?? 0;
+			const thumbRow = Math.round(
+				(scrollOff / maxOffset) * (viewportHeight - 1),
+			);
+
+			const chars: string[] = [];
+			for (let li = 0; li < viewportHeight; li++) {
+				chars.push(
+					li === thumbRow ? this.accentColorFn("█") : this.dimColorFn("│"),
+				);
+			}
+
+			data.set(key, {
+				chars,
+				contentWidth: rw.width - 1,
+			});
+		}
+
+		return data;
 	}
 
 	private clampLine(line: string, width: number): string {

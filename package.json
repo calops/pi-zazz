@@ -3,8 +3,18 @@
   "version": "0.1.0",
   "description": "Fancy editor UI extension for pi coding agent",
   "type": "module",
-  "files": ["*.ts", "*.md", "*.json"],
-  "keywords": ["pi-package", "pi", "coding-agent", "editor", "extension"],
+  "files": [
+    "*.ts",
+    "*.md",
+    "*.json"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "editor",
+    "extension"
+  ],
   "license": "MIT",
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -23,6 +33,11 @@
     "typescript": "^5.8.0"
   },
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "dependencies": {
+    "@m234/nerd-fonts": "^0.5.1"
   }
 }
