@@ -5,13 +5,13 @@
 
 export const ICONS = {
 	// Model / AI
-	model: "󰘚 ", // nf-md-brain
+	model: "󰧑 ", // nf-md-brain
 
 	// Shell
 	shell: " ", // nf-fa-terminal
 
 	// Path / folder
-	folder: " ", // nf-fa-folder
+	folder: " ", // nf-fa-folder
 
 	// Git
 	branch: " ", // nf-fa-code_fork
@@ -24,7 +24,7 @@ export const ICONS = {
 	thinking: " ", // nf-fa-circle
 
 	// Context / memory
-	context: "󰃟 ", // nf-md-chart_donut
+	context: "󰞯 ", // nf-md-chart_donut
 
 	// Diagnostics
 	error: " ", // nf-fa-times_circle
@@ -36,11 +36,11 @@ export const ICONS = {
 	clock: " ", // nf-fa-clock
 
 	// Tokens
-	tokensIn: "󰁕 ", // nf-md-arrow_down
-	tokensOut: "󰁔 ", // nf-md-arrow_up
+	tokensIn: " ", // nf-md-arrow_down
+	tokensOut: " ", // nf-md-arrow_up
 
 	// Cost / money
-	cost: " ", // nf-fa-money
+	cost: " ", // nf-fa-money
 
 	// Blocked / lock
 	locked: " ", // nf-fa-lock
@@ -49,10 +49,10 @@ export const ICONS = {
 	session: "󰌆 ", // nf-md-identifier
 
 	// Host
-	host: "󰒋 ", // nf-md-server
+	host: " ", // nf-md-server
 
 	// Cache
-	cache: "󰏗 ", // nf-md-database
+	cache: " ", // nf-md-database
 	cacheRead: "\u{DB80}\u{DC55}", // same as tokensIn
 	cacheWrite: "\u{DB80}\u{DC54}", // same as tokensOut
 
@@ -61,7 +61,7 @@ export const ICONS = {
 	prevPrompt: " ", // nf-fa-chevron_left
 
 	// LSP / language
-	lsp: "󰨞 ", // nf-md-language_c
+	lsp: " ", // nf-md-language_c
 
 	// Formatter
 	formatter: " ", // nf-fa-pencil

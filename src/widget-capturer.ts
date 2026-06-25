@@ -15,6 +15,8 @@
 
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
+import * as ansi from "./color/ansi.ts";
+import * as palette from "./color/palette.ts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -178,5 +180,5 @@ function disposeComponent(comp: Component | null): void {
 }
 
 function wrapError(msg: string): string {
-	return ` \x1b[31m${msg}\x1b[0m`; // red text
+	return ` ${ansi.fgSeq(...palette.getRgb("red"))}${msg}${ansi.RESET}`;
 }

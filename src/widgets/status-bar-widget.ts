@@ -1,8 +1,6 @@
 import { registerWidget } from "./registry.ts";
 import type { WidgetDeps, WidgetFactory } from "./types.ts";
-import { visibleWidth } from "@earendil-works/pi-tui";
 import {
-	type Pill,
 	makePill,
 	makeExtension,
 	packPills,
@@ -15,29 +13,35 @@ import {
 	type SegmentOptions,
 } from "../status-bar/segments.ts";
 import { getPalette } from "../terminal-palette.ts";
-import { setBgRgb } from "../status-bar/pill-renderer.ts";
+import * as palette from "../color/palette.ts";
 
-// ── Dynamic palette-backed color helpers ─────────────────────────────────────
+// ── Palette initialisation ───────────────────────────────────────────────────
 
-let _pillFg = "0";
-let _segmentColors: Record<string, (t: string) => string> | null = null;
-let _neutralBgIndex = 238;
+let _colorsInitialised = false;
 
+/**
+ * Register all terminal-detected colours into the named colour palette.
+ * Called once before the first render.
+ */
 function ensureColors(): void {
-	if (_segmentColors) return;
-	const pal = getPalette();
-	_pillFg = String(pal.pillFg);
-	_neutralBgIndex = pal.neutralBg ?? 238;
-	// Keep blendTowardBg in sync with the actual terminal background
-	setBgRgb(pal.bgRgb[0], pal.bgRgb[1], pal.bgRgb[2]);
+	if (_colorsInitialised) return;
+	_colorsInitialised = true;
 
-	const fns: Record<string, (t: string) => string> = {};
-	for (const [seg, bg] of Object.entries(pal.segmentBg)) {
-		fns[seg] = (t: string) =>
-			`\x1b[48;5;${bg}m\x1b[38;5;${_pillFg}m${t}\x1b[0m`;
+	const pal = getPalette();
+	palette.setBgRgb(pal.bgRgb[0], pal.bgRgb[1], pal.bgRgb[2]);
+	palette.define(
+		"neutral",
+		pal.neutralBg[0],
+		pal.neutralBg[1],
+		pal.neutralBg[2],
+	);
+
+	for (const [seg, rgb] of Object.entries(pal.segmentBg)) {
+		palette.define(seg, rgb[0], rgb[1], rgb[2]);
 	}
-	_segmentColors = fns;
 }
+
+// ── Widget factory ───────────────────────────────────────────────────────────
 
 export const statusBarWidgetFactory: WidgetFactory = (
 	deps: WidgetDeps,
@@ -74,8 +78,8 @@ export const statusBarWidgetFactory: WidgetFactory = (
 	const cachedTokensTotal = 0;
 	const cachedCacheRead = 0;
 	const cachedCacheWrite = 0;
-	const cachedCost = 0;
-	const cachedUsingSubscription = false;
+	let cachedCost = 0;
+	let cachedUsingSubscription = false;
 	let cachedSessionStartTime = Date.now();
 	const cachedGit = {
 		branch: null as string | null,
@@ -112,9 +116,6 @@ export const statusBarWidgetFactory: WidgetFactory = (
 				untracked = 0;
 			for (const line of status.split("\n")) {
 				if (!line.trim()) continue;
-				// git status --porcelain: XY filename
-				// X = index (staging area), Y = work tree
-				// "??" = untracked — skip staged/unstaged counting for these
 				if (line.startsWith("??")) {
 					untracked++;
 					continue;
@@ -132,11 +133,58 @@ export const statusBarWidgetFactory: WidgetFactory = (
 		}
 	}
 
-	pi.on("session_start", (_event: unknown, ctx: { cwd?: string }) => {
-		cachedSessionStartTime = Date.now();
-		cachedCwd = ctx.cwd ?? process.cwd();
-		refreshGitStatus();
-	});
+	pi.on(
+		"session_start",
+		(
+			_event: unknown,
+			ctx: {
+				cwd?: string;
+				sessionManager?: {
+					getEntries?: () => Array<{
+						type: string;
+						id: string;
+						message?: {
+							role?: string;
+							usage?: {
+								cost?: { total?: number };
+							};
+						};
+					}>;
+				};
+				modelRegistry?: {
+					isUsingOAuth?: (model: { provider: string }) => boolean;
+				};
+				model?: { provider: string };
+			},
+		) => {
+			cachedSessionStartTime = Date.now();
+			cachedCwd = ctx.cwd ?? process.cwd();
+			cachedCost = 0;
+			cachedUsingSubscription = false;
+			const entries = ctx.sessionManager?.getEntries?.();
+			if (entries) {
+				let totalCost = 0;
+				let hasAssistantMessages = false;
+				for (const entry of entries) {
+					if (
+						entry.type === "message" &&
+						entry.message?.role === "assistant" &&
+						entry.message?.usage?.cost?.total != null
+					) {
+						totalCost += entry.message.usage.cost.total;
+						hasAssistantMessages = true;
+					}
+				}
+				if (hasAssistantMessages) {
+					cachedCost = totalCost;
+				}
+			}
+			if (ctx.modelRegistry?.isUsingOAuth && ctx.model) {
+				cachedUsingSubscription = ctx.modelRegistry.isUsingOAuth(ctx.model);
+			}
+			refreshGitStatus();
+		},
+	);
 
 	pi.on("turn_end", () => {
 		refreshGitStatus();
@@ -163,7 +211,22 @@ export const statusBarWidgetFactory: WidgetFactory = (
 					contextWindow?: number;
 					percent?: number | null;
 				};
-				sessionManager?: { getEntries?: () => Array<{ sessionId?: string }> };
+				sessionManager?: {
+					getEntries?: () => Array<{
+						type: string;
+						id: string;
+						message?: {
+							role?: string;
+							usage?: {
+								cost?: { total?: number };
+							};
+						};
+					}>;
+				};
+				modelRegistry?: {
+					isUsingOAuth?: (model: { provider: string }) => boolean;
+				};
+				model?: { provider: string };
 			},
 		) => {
 			const usage = ctx.getContextUsage?.() ?? {
@@ -174,8 +237,28 @@ export const statusBarWidgetFactory: WidgetFactory = (
 			cachedContextPercent = usage.percent ?? 0;
 			cachedContextWindow = usage.contextWindow ?? 0;
 			const entries = ctx.sessionManager?.getEntries?.();
-			if (entries && entries.length > 0) {
-				cachedSessionId = entries[0]!.sessionId ?? cachedSessionId;
+			if (entries) {
+				let totalCost = 0;
+				let hasAssistantMessages = false;
+				let firstId: string | undefined;
+				for (const entry of entries) {
+					if (!firstId) firstId = entry.id;
+					if (
+						entry.type === "message" &&
+						entry.message?.role === "assistant" &&
+						entry.message?.usage?.cost?.total != null
+					) {
+						totalCost += entry.message.usage.cost.total;
+						hasAssistantMessages = true;
+					}
+				}
+				if (hasAssistantMessages) {
+					cachedCost = totalCost;
+				}
+				if (ctx.modelRegistry?.isUsingOAuth && ctx.model) {
+					cachedUsingSubscription = ctx.modelRegistry.isUsingOAuth(ctx.model);
+				}
+				cachedSessionId = firstId?.slice(0, 8) ?? cachedSessionId;
 			}
 		},
 	);
@@ -235,16 +318,25 @@ export const statusBarWidgetFactory: WidgetFactory = (
 				if (!segFn) return null;
 				const result = segFn(ctx);
 				if (!result.visible) return null;
-				const colorFn =
-					_segmentColors?.[segId] ??
-					((t: string) =>
-						`\x1b[48;5;${_neutralBgIndex}m\x1b[38;5;${_pillFg}m${t}\x1b[0m`);
-				const pill = makePill("", result.text, colorFn);
-				// Attach right extension if the segment provides one
-				if (result.rightExtension && pill.bg !== null) {
-					pill.rightExt = makeExtension(result.rightExtension, pill.bg);
+
+				const bgName = palette.has(segId) ? segId : "neutral";
+
+				if (result.icon) {
+					const pill = makePill(result.icon, "", bgName, "terminal-bg");
+					if (result.text) {
+						pill.rightExt = makeExtension(result.text, bgName);
+					}
+					if (result.leftExtension) {
+						pill.leftExt = makeExtension(result.leftExtension, bgName);
+					}
+					return pill;
+				} else {
+					const pill = makePill("", result.text, bgName, "terminal-bg");
+					if (result.leftExtension) {
+						pill.leftExt = makeExtension(result.leftExtension, bgName);
+					}
+					return pill;
 				}
-				return pill;
 			};
 
 			const leftPills = leftSegments
@@ -256,15 +348,8 @@ export const statusBarWidgetFactory: WidgetFactory = (
 				.filter((p): p is NonNullable<typeof p> => p !== null);
 
 			// Append a pill for every extension status
-			// (right-aligned, behind configured rightSegments)
 			for (const [, value] of cachedExtensionStatuses) {
-				const pill: Pill = {
-					text: `\x1b[48;5;${_neutralBgIndex}m\x1b[38;5;${_pillFg}m${value}\x1b[0m`,
-					width: visibleWidth(value),
-					bg: _neutralBgIndex,
-					fg: parseInt(_pillFg, 10),
-				};
-				rightPills.push(pill);
+				rightPills.push(makePill("", value, "neutral", "terminal-bg"));
 			}
 
 			const line = packPills(leftPills, rightPills, separator, width);

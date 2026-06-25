@@ -1,4 +1,4 @@
 {
-  "defaultModel": "deepseek-v4-flash",
+  "defaultModel": "deepseek-v4-pro",
   "defaultProvider": "opencode-go"
 }

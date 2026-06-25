@@ -1,5 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { ICONS } from "../icons.ts";
+import * as style from "../color/style.ts";
+import { defineBlend } from "../color/palette.ts";
 
 /** A smaller sub-pill attached to the left or right of a main pill. */
 export interface PillExtension {
@@ -7,30 +9,26 @@ export interface PillExtension {
 	text: string;
 	/** Visible width of the text */
 	width: number;
-	/** Background RGB for true color ANSI (darkened via blendTowardBg) */
-	darkR: number;
-	darkG: number;
-	darkB: number;
-	/** Foreground color index (the main pill's main/accent color) */
-	mainFg: number;
+	/** Registered colour name for the extension's blended background */
+	bgColor: string;
+	/** Registered colour name for the text foreground (the main pill's accent) */
+	fgColor: string;
 }
 
 export interface Pill {
-	/** ANSI-styled text (includes ANSI codes for bg/fg colors) */
+	/** ANSI-styled text (includes colour codes) */
 	text: string;
 	/** Visible width of the text portion */
 	width: number;
-	/** 256-color background index extracted from the ANSI codes (for powerline separators) */
-	bg: number | null;
-	/** 256-color foreground index extracted from the ANSI codes (for powerline separators) */
-	fg: number | null;
+	/** Registered colour name for the pill's background (for powerline separators) */
+	bgColor: string;
+	/** Registered colour name for the pill's foreground */
+	fgColor: string;
 	/** Optional sub-pill attached to the left side */
 	leftExt?: PillExtension;
 	/** Optional sub-pill attached to the right side */
 	rightExt?: PillExtension;
 }
-
-export type ColorFn = (text: string) => string;
 
 export interface PillSeparator {
 	char: string;
@@ -50,117 +48,95 @@ export const SEPARATORS: Record<string, PillSeparator> = {
 	ascii: { char: " | ", width: 3 },
 };
 
-// Window background — updated dynamically from terminal palette.
-let BG_RGB: [number, number, number] = [30, 30, 46];
-
-/** Override the terminal background RGB used by blendTowardBg. */
-export function setBgRgb(r: number, g: number, b: number): void {
-	BG_RGB = [r, g, b];
-}
-
-/** Read the current terminal background RGB. */
-export function getBgRgb(): [number, number, number] {
-	return BG_RGB;
-}
+// ── Pill construction ───────────────────────────────────────────────────────
 
 /**
- * Blend a color toward the window background using linear RGB interpolation
- * (snacks.nvim's blend formula). Returns RGB triple for direct use in true
- * color ANSI codes instead of quantizing through the 6×6×6 cube.
+ * Construct a Pill with its content styled using named colours.
+ * The text is styled as "punched out" — background is the named colour,
+ * foreground is the terminal's own background colour.
  */
-export function blendTowardBg(
-	baseR: number,
-	baseG: number,
-	baseB: number,
-	alpha = 0.3,
-): [number, number, number] {
-	return [
-		Math.round(alpha * baseR + (1 - alpha) * BG_RGB[0]),
-		Math.round(alpha * baseG + (1 - alpha) * BG_RGB[1]),
-		Math.round(alpha * baseB + (1 - alpha) * BG_RGB[2]),
-	];
-}
-
-/**
- * Darken a 256-color index by blending toward the window background.
- * The result is a 256-color index (falls back to nearest cube entry when
- * true color isn't needed).
- */
-export function darkenColor(baseColor: number, alpha = 0.3): number {
-	// The 6×6×6 cube is too coarse for proper darkening. Callers that need
-	// precision should use blendTowardBg() with true color ANSI codes.
-	return Math.round(baseColor * alpha);
-}
-
-/**
- * Render a single pill with rounded separators and a trailing space.
- * Render a single pill with rounded separators and a trailing space.
- * If the pill has a right extension, it blends under the closing .
- */
-function renderPill(
-	p: Pill,
-	trailingSpace: boolean,
-	fallbackSep: string,
-): string {
-	if (p.bg !== null && p.fg !== null) {
-		const hasRightExt = !!p.rightExt;
-		return (
-			// Opening rounded left edge (fg=pill_bg, bg=terminal default)
-			`\x1b[38;5;${p.bg}m\x1b[49m\u{E0B6}\x1b[0m` +
-			// Pill content (already styled from makePill)
-			p.text +
-			// Closing  transitions to extension bg when present, otherwise terminal default
-			(hasRightExt && p.rightExt
-				? `\x1b[0m\x1b[38;5;${p.bg}m\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\u{E0B4}\x1b[0m` +
-				// Extension content (blended under the )
-				`\x1b[48;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[38;5;${p.rightExt.mainFg}m${p.rightExt.text}\x1b[0m` +
-				// Extension closing  (true color)
-				`\x1b[38;2;${p.rightExt.darkR};${p.rightExt.darkG};${p.rightExt.darkB}m\x1b[49m\u{E0B4}\x1b[0m`
-				: `\x1b[38;5;${p.bg}m\x1b[49m\u{E0B4}\x1b[0m`) +
-			// Single space between pills
-			(trailingSpace ? " " : "")
-		);
-	}
-	// Fallback for pills without color info
-	return p.text + (trailingSpace ? fallbackSep : "");
-}
-
-/** 6×6×6 cube level → actual RGB value. */
-function cubeLevelRgb(idx: number): [number, number, number] {
-	const levels = [0, 95, 135, 175, 215, 255];
-	const n = idx - 16;
-	return [
-		levels[Math.floor(n / 36)]!,
-		levels[Math.floor((n % 36) / 6)]!,
-		levels[n % 6]!,
-	];
-}
-
-/** Build a PillExtension from raw text and the main pill's base 256-color bg. */
-export function makeExtension(text: string, baseBg: number): PillExtension {
-	const [r, g, b] = cubeLevelRgb(baseBg);
-	const [dr, dg, db] = blendTowardBg(r, g, b, 0.2);
+export function makePill(
+	iconStr: string,
+	text: string,
+	bgColor: string,
+	fgColor: string,
+): Pill {
+	const content = iconStr ? `${iconStr}${text}` : text;
+	const styled = style.punched(bgColor, content);
 	return {
-		text,
-		width: visibleWidth(text),
-		darkR: dr,
-		darkG: dg,
-		darkB: db,
-		mainFg: baseBg,
+		text: styled,
+		width: visibleWidth(styled),
+		bgColor,
+		fgColor,
 	};
 }
 
-/**
- * Pack pills horizontally into available width.
- * Overflow removes pills from the middle inward.
- */
-/** Computes the full visible width of a pill including its / and any extensions. */
+/** Build a PillExtension with blended background from a base colour name. */
+export function makeExtension(text: string, baseColor: string): PillExtension {
+	const blendName = defineBlend(baseColor, 0.2);
+	return {
+		text,
+		width: visibleWidth(text),
+		bgColor: blendName,
+		fgColor: baseColor,
+	};
+}
+
+// ── Rendering ───────────────────────────────────────────────────────────────
+
+/** Render a single pill with rounded separators and a trailing space. */
+function renderPill(
+	p: Pill,
+	trailingSpace: boolean,
+	_fallbackSep: string,
+): string {
+	const hasLeftExt = !!p.leftExt;
+	const hasRightExt = !!p.rightExt;
+
+	let result = "";
+
+	// Left extension:  + text + transition 
+	if (hasLeftExt && p.leftExt) {
+		const ext = p.leftExt;
+		result +=
+			// Opening rounded left edge in extension colour
+			style.powerlineLeft(ext.bgColor) +
+			// Extension content (blended bg, main accent fg)
+			style.apply(ext.bgColor, ext.fgColor, ext.text) +
+			// Transition  from extension bg to main pill bg (main encroaches onto ext)
+			style.powerlineLeft(p.bgColor, ext.bgColor);
+	} else {
+		// No left extension: standard opening rounded left edge
+		result += style.powerlineLeft(p.bgColor);
+	}
+
+	// Main pill content (already styled from makePill)
+	result += p.text;
+
+	// Right extension / main closing 
+	if (hasRightExt && p.rightExt) {
+		const ext = p.rightExt;
+		result +=
+			// Transition  from main bg to extension bg
+			style.powerlineRight(p.bgColor, ext.bgColor) +
+			// Extension content (blended bg, main accent fg)
+			style.apply(ext.bgColor, ext.fgColor, ext.text) +
+			// Extension closing 
+			style.powerlineRight(ext.bgColor);
+	} else {
+		result += style.powerlineRight(p.bgColor);
+	}
+
+	// Single space between pills
+	result += trailingSpace ? " " : "";
+	return result;
+}
+
+/** Computes the full visible width of a pill including its separators. */
 function pillFullWidth(p: Pill): number {
-	const mainWidth = p.width + 2; //  + content + 
-	const leftExt = p.leftExt ? p.leftExt.width + 2 : 0; //  + text + 
-	// Right extension blends under the main ; only adds content + closing 
-	const rightExt = p.rightExt ? p.rightExt.width + 1 : 0;
-	return mainWidth + leftExt + rightExt;
+	const leftChars = p.leftExt ? p.leftExt.width + 2 : 1;
+	const rightChars = p.rightExt ? p.rightExt.width + 2 : 1;
+	return leftChars + p.width + rightChars;
 }
 
 export function packPills(
@@ -172,7 +148,7 @@ export function packPills(
 	const left = [...leftPills];
 	const right = [...rightPills];
 
-	const spaceBetween = 1; // single space between pills
+	const spaceBetween = 1;
 
 	let totalNeeded = 0;
 	for (const p of [...left, ...right]) totalNeeded += pillFullWidth(p);
@@ -206,29 +182,4 @@ export function packPills(
 	const gapStr = gap > 0 ? " ".repeat(gap) : "";
 
 	return leftStr + gapStr + rightStr;
-}
-
-/** Extract 256-color bg/fg from an ANSI-styled pill string. */
-function extractPillColors(styled: string): {
-	bg: number | null;
-	fg: number | null;
-} {
-	const bgMatch = styled.match(/\x1b\[48;5;(\d+)m/);
-	const fgMatch = styled.match(/\x1b\[38;5;(\d+)m/);
-	return {
-		bg: bgMatch ? parseInt(bgMatch[1]!, 10) : null,
-		fg: fgMatch ? parseInt(fgMatch[1]!, 10) : null,
-	};
-}
-
-export function makePill(iconStr: string, text: string, color: ColorFn): Pill {
-	const content = iconStr ? `${iconStr}${text}` : text;
-	const styled = color(content);
-	const colors = extractPillColors(styled);
-	return {
-		text: styled,
-		width: visibleWidth(styled),
-		bg: colors.bg,
-		fg: colors.fg,
-	};
 }

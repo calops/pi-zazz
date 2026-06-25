@@ -8,6 +8,8 @@ import {
 	type OverlayHandle,
 	type TUI,
 } from "@earendil-works/pi-tui";
+import * as ansi from "../color/ansi.ts";
+import * as palette from "../color/palette.ts";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -53,7 +55,7 @@ class CompletionOverlayComponent implements Component {
 		if (this.items.length === 0) return [];
 
 		const actualWidth = _width > 0 ? _width : this.width;
-		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		const dim = (s: string) => `${ansi.DIM}${s}${ansi.NO_BOLD_DIM}`;
 
 		// Recompute layout from columns + items + available width
 		const innerWidth = actualWidth - 4; // │ (content) │
@@ -181,7 +183,7 @@ class OverlayEditor extends Editor {
 			if (content.length > 0 && content[0]) {
 				const arrow =
 					this.deps?.theme?.fg?.("muted", icon("promptArrow")) ??
-					`\x1b[2m${icon("promptArrow")} \x1b[22m`;
+					`${ansi.DIM}${icon("promptArrow")} ${ansi.NO_BOLD_DIM}`;
 				content[0] = arrow + content[0];
 			}
 
@@ -200,12 +202,12 @@ class OverlayEditor extends Editor {
 		const sty = (text: string) =>
 			isBash
 				? (this.deps?.theme?.fg?.("success", text) ??
-					`\x1b[38;5;2m${text}\x1b[0m`)
+					`${ansi.fgSeq(...palette.getRgb("success"))}${text}${ansi.RESET}`)
 				: (this.deps?.theme?.fg?.("border", text) ?? text);
 
 		const arrow =
 			this.deps?.theme?.fg?.("muted", icon("promptArrow") + " ") ??
-			`\x1b[2m${icon("promptArrow")} \x1b[22m`;
+			`${ansi.DIM}${icon("promptArrow")} ${ansi.NO_BOLD_DIM}`;
 
 		const result: string[] = [];
 
@@ -256,7 +258,7 @@ class OverlayEditor extends Editor {
 		// Build colour helpers from theme
 		const colorFn = (cat: CompletionCategory, text: string) =>
 			this.deps!.theme.fg(categoryColorName(cat), text);
-		const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
+		const dim = (s: string) => `${ansi.DIM}${s}${ansi.NO_BOLD_DIM}`;
 		const sourceTagStyle = (tag: string) => {
 			if (tag === "custom") return dim(this.deps!.theme.fg("success", tag));
 			if (tag === "builtin") return dim(this.deps!.theme.fg("warning", tag));
@@ -295,7 +297,7 @@ class OverlayEditor extends Editor {
 					const r = Number.parseInt(hex.slice(1, 3), 16);
 					const g = Number.parseInt(hex.slice(3, 5), 16);
 					const b = Number.parseInt(hex.slice(5, 7), 16);
-					const styled = `\x1b[38;2;${r};${g};${b}m${fileIcon.icon}\x1b[39m`;
+					const styled = `${ansi.fgSeq(r, g, b)}${fileIcon.icon}${ansi.DEFAULT_FG}`;
 					return { ...item, _nerdIcon: styled };
 				}
 			} catch {

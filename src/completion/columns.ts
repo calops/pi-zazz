@@ -2,6 +2,7 @@ import { visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
 import type { RowContext } from "./categories.ts";
 import { iconForCategory } from "./categories.ts";
+import * as ansi from "../color/ansi.ts";
 
 // ── Column definition ──────────────────────────────────────────────
 
@@ -38,8 +39,8 @@ export interface ColumnEnv {
 	sourceTagStyle: (tag: string) => string;
 }
 
-const dim = (s: string) => `\x1b[2m${s}\x1b[22m`;
-const bright = (s: string) => `\x1b[1m${s}\x1b[22m`;
+const dim = (s: string) => `${ansi.DIM}${s}${ansi.NO_BOLD_DIM}`;
+const bright = (s: string) => `${ansi.BRIGHT}${s}${ansi.NO_BOLD_DIM}`;
 
 export function selectionColumn(): Column {
 	return {

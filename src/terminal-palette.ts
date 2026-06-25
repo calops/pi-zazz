@@ -11,6 +11,8 @@
  *
  * If the query fails entirely (terminal doesn't support OSC 4, or no
  * TTY available) the module falls back to the existing hardcoded values.
+ *
+ * All colors in the palette are true color RGB triples — no 256-color indices.
  */
 
 import fs from "node:fs";
@@ -29,16 +31,14 @@ export interface TerminalColor {
 	b: number;
 }
 
-/** Fully analysed color palette for pi-zazz rendering */
+/** Fully analysed color palette for pi-zazz rendering (all true color). */
 export interface TerminalPalette {
 	/** Terminal default background (OSC 11, fallback to OSC 4 color 0) */
 	bgRgb: [number, number, number];
-	/** Per-segment 256-color background index */
-	segmentBg: Readonly<Record<string, number>>;
-	/** Neutral gray background index (for extension statuses, etc.) */
-	neutralBg: number;
-	/** Foreground index (always 0 = terminal default bg → "punched out" text) */
-	pillFg: number;
+	/** Per-segment true color background */
+	segmentBg: Readonly<Record<string, [number, number, number]>>;
+	/** Neutral gray background (for extension statuses, etc.) */
+	neutralBg: [number, number, number];
 	/** Whether this palette was dynamically queried from the terminal */
 	dynamic: boolean;
 }
@@ -98,6 +98,45 @@ function hueBin(hue: number, sat: number): string {
 	if (hue < 260) return "blue";
 	if (hue < 300) return "purple";
 	return "magenta";
+}
+
+/** Convert a 256-color index (0-255) to its standard RGB value. */
+function indexToRgb(idx: number): [number, number, number] {
+	if (idx < 16) {
+		// Standard and bright ANSI colors
+		const ansi: [number, number, number][] = [
+			[0, 0, 0], // 0  black
+			[128, 0, 0], // 1  red
+			[0, 128, 0], // 2  green
+			[128, 128, 0], // 3  yellow
+			[0, 0, 128], // 4  blue
+			[128, 0, 128], // 5  magenta
+			[0, 128, 128], // 6  cyan
+			[192, 192, 192], // 7  white
+			[128, 128, 128], // 8  bright black
+			[255, 0, 0], // 9  bright red
+			[0, 255, 0], // 10 bright green
+			[255, 255, 0], // 11 bright yellow
+			[0, 0, 255], // 12 bright blue
+			[255, 0, 255], // 13 bright magenta
+			[0, 255, 255], // 14 bright cyan
+			[255, 255, 255], // 15 bright white
+		];
+		return ansi[idx]!;
+	}
+	if (idx < 232) {
+		// 6×6×6 cube (indices 16-231)
+		const levels = [0, 95, 135, 175, 215, 255];
+		const n = idx - 16;
+		return [
+			levels[Math.floor(n / 36)]!,
+			levels[Math.floor((n % 36) / 6)]!,
+			levels[n % 6]!,
+		];
+	}
+	// Grayscale (indices 232-255)
+	const gray = Math.round(((idx - 232) / 23) * 255);
+	return [gray, gray, gray];
 }
 
 // ── Query implementation via subprocess ──────────────────────────────────────
@@ -254,7 +293,7 @@ const NEUTRAL_SEGMENTS: string[] = [
 /**
  * From a set of queried terminal colors and the terminal background,
  * build a palette that assigns each semantic segment a distinct, legible
- * 256-color index.
+ * true color.
  */
 function buildPalette(
 	colors: TerminalColor[],
@@ -299,22 +338,23 @@ function buildPalette(
 		}
 	}
 
-	// 4. Assign colours to segments
-	const assignments: Record<string, number> = {};
+	type RgbTriple = [number, number, number];
+	const assignments: Record<string, RgbTriple> = {};
 	const assigned = new Set<number>();
 
-	function pickBin(bin: string, fallback: number): number {
+	/** Pick the best unassigned color from a hue bin and return it as RGB. */
+	function pickBin(bin: string, fallbackIdx: number): RgbTriple {
 		const c = sorted.find((s) => s.bin === bin && !assigned.has(s.index));
 		if (c) {
 			assigned.add(c.index);
-			return c.index;
+			return [c.r, c.g, c.b];
 		}
 		const b = binBest.get(bin);
 		if (b) {
 			assigned.add(b.index);
-			return b.index;
+			return [b.r, b.g, b.b];
 		}
-		return fallback;
+		return indexToRgb(fallbackIdx);
 	}
 
 	// Priority order: first pick in a bin gets the best unassigned color
@@ -325,14 +365,16 @@ function buildPalette(
 	assignments.cost = pickBin("orange", 130);
 	assignments.shell_mode = pickBin("cyan", 33);
 
-	// 4b. Context pill — distinct color (red hue to indicate usage importance)
+	// Context pill — distinct color (red hue to indicate usage importance)
 	assignments.context_pct = pickBin("red", 167);
 
 	// 5. Neutral gray segments
 	const neutral = sorted.find(
 		(s) => s.bin === "gray" && !assigned.has(s.index) && s.lum > 40,
 	);
-	const neutralBg = neutral?.index ?? 238;
+	const neutralBg: RgbTriple = neutral
+		? [neutral.r, neutral.g, neutral.b]
+		: indexToRgb(238);
 	for (const seg of NEUTRAL_SEGMENTS) {
 		assignments[seg] = neutralBg;
 	}
@@ -341,7 +383,6 @@ function buildPalette(
 		bgRgb,
 		segmentBg: assignments,
 		neutralBg,
-		pillFg: 0,
 		dynamic: true,
 	};
 }
@@ -352,27 +393,26 @@ function buildFallbackPalette(): TerminalPalette {
 	return {
 		bgRgb: [30, 30, 46], // Catppuccin Mocha base
 		segmentBg: {
-			model: 39,
-			thinking: 99,
-			shell_mode: 33,
-			path: 71,
-			git: 178,
-			context_pct: 167,
-			context_total: 238,
-			cost: 130,
-			token_in: 238,
-			token_out: 238,
-			token_total: 238,
-			cache_read: 238,
-			cache_write: 238,
-			time: 238,
-			time_spent: 238,
-			session: 238,
-			hostname: 238,
-			extension_statuses: 238,
+			model: indexToRgb(39),
+			thinking: indexToRgb(99),
+			shell_mode: indexToRgb(33),
+			path: indexToRgb(71),
+			git: indexToRgb(178),
+			context_pct: indexToRgb(167),
+			context_total: indexToRgb(238),
+			cost: indexToRgb(130),
+			token_in: indexToRgb(238),
+			token_out: indexToRgb(238),
+			token_total: indexToRgb(238),
+			cache_read: indexToRgb(238),
+			cache_write: indexToRgb(238),
+			time: indexToRgb(238),
+			time_spent: indexToRgb(238),
+			session: indexToRgb(238),
+			hostname: indexToRgb(238),
+			extension_statuses: indexToRgb(238),
 		},
-		neutralBg: 238,
-		pillFg: 0,
+		neutralBg: indexToRgb(238),
 		dynamic: false,
 	};
 }
